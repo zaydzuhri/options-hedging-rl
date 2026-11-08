@@ -590,7 +590,7 @@ wheels = [
 ]
 
 [[package]]
-name = "options-rl"
+name = "options-hedging-rl"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
