@@ -1,4 +1,4 @@
-# options-rl: hedging backtester
+# options-hedging-rl: hedging backtester
 
 ```bash
 uv sync
