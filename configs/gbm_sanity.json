@@ -1,0 +1,13 @@
+{
+  "name": "gbm_sanity",
+  "data": {"source": "gbm", "n_steps": 50000, "sigma": 0.2, "mu": 0.05, "seed": 0},
+  "vol": {"type": "constant", "value": 0.2},
+  "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},
+  "market": {"rate": 0.0, "cost_bps": 0, "steps_per_year": 252},
+  "episodes": {"stride": 21},
+  "strategies": [
+    {"name": "no_hedge"},
+    {"name": "delta_hedge", "label": "delta_daily"},
+    {"name": "delta_hedge", "label": "delta_weekly", "params": {"rebalance_every": 5}}
+  ]
+}

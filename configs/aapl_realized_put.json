@@ -1,0 +1,14 @@
+{
+  "name": "aapl_realized_put",
+  "data": {"source": "yahoo", "ticker": "AAPL", "start": "2015-01-01", "end": "2025-12-31", "interval": "1d"},
+  "vol": {"type": "realized", "window": 21},
+  "option": {"type": "put", "moneyness": 0.95, "maturity_steps": 42},
+  "market": {"rate": 0.03, "cost_bps": 10, "steps_per_year": 252},
+  "episodes": {"stride": 5},
+  "strategies": [
+    {"name": "no_hedge"},
+    {"name": "delta_hedge", "label": "delta_daily"},
+    {"name": "delta_band", "label": "delta_band_0.05", "params": {"band": 0.05}},
+    {"name": "delta_band", "label": "delta_band_0.05_edge", "params": {"band": 0.05, "to_edge": true}}
+  ]
+}

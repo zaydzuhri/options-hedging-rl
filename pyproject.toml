@@ -1,0 +1,10 @@
+[project]
+name = "options-rl"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.5.4",
+    "pandas>=3.1.1",
+    "yfinance>=1.8.0",
+]

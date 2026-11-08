@@ -1,0 +1,14 @@
+{
+  "name": "spy_vix",
+  "data": {"source": "yahoo", "ticker": "SPY", "start": "2005-01-01", "end": "2025-12-31", "interval": "1d"},
+  "vol": {"type": "ticker", "ticker": "^VIX", "scale": 0.01},
+  "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},
+  "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},
+  "episodes": {"stride": 5},
+  "strategies": [
+    {"name": "no_hedge"},
+    {"name": "delta_hedge", "label": "delta_daily"},
+    {"name": "delta_hedge", "label": "delta_weekly", "params": {"rebalance_every": 5}},
+    {"name": "delta_band", "label": "delta_band_0.1", "params": {"band": 0.1}}
+  ]
+}
