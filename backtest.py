@@ -3,12 +3,11 @@ Backtest option-hedging strategies on real (Yahoo Finance) or simulated price pa
 
     uv run backtest.py --config configs/spy_vix.json
 
-File layout (top to bottom):
-  1. Black-Scholes pricing          -> option price, delta, gamma
-  2. Market data                    -> a price series + a volatility series
-  3. Episodes                       -> slice the series into one-option-lifetime chunks
-  4. HedgingEnv                     -> step-by-step simulation of hedging one option (gym-like)
-  5. Running, metrics, plots, CLI
+File layout (top to bottom; Black-Scholes pricing lives in strategy.py):
+  1. Market data                    -> a price series + a volatility series
+  2. Episodes                       -> slice the series into one-option-lifetime chunks
+  3. HedgingEnv                     -> step-by-step simulation of hedging one option (gym-like)
+  4. Running, metrics, plots, CLI
 
 Why the option is "synthetic": Yahoo only has TODAY's option prices, not historical ones.
 So we take the real historical stock path and pretend we sold an option at each start date,
@@ -22,46 +21,18 @@ import math
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from statistics import NormalDist
 
 import numpy as np
 import pandas as pd
 
-from strategy import Observation, Strategy
+from strategy import Observation, Strategy, black_scholes
 from strategies import STRATEGIES
 
 CACHE_DIR = Path("data_cache")
-_N = NormalDist()
 
 
 # ---------------------------------------------------------------------------
-# 1. Black-Scholes
-# ---------------------------------------------------------------------------
-
-def black_scholes(spot, strike, tau, vol, rate, kind="call"):
-    """Price, delta and gamma of a European option.
-    tau = years to maturity. At tau == 0 this returns the payoff (and a 0/1 delta)."""
-    if tau <= 0 or vol <= 0:
-        itm = spot > strike if kind == "call" else spot < strike
-        payoff = max(spot - strike, 0.0) if kind == "call" else max(strike - spot, 0.0)
-        delta = (1.0 if kind == "call" else -1.0) if itm else 0.0
-        return payoff, delta, 0.0
-    sq = vol * math.sqrt(tau)
-    d1 = (math.log(spot / strike) + (rate + 0.5 * vol**2) * tau) / sq
-    d2 = d1 - sq
-    disc = math.exp(-rate * tau)
-    if kind == "call":
-        price = spot * _N.cdf(d1) - strike * disc * _N.cdf(d2)
-        delta = _N.cdf(d1)
-    else:
-        price = strike * disc * _N.cdf(-d2) - spot * _N.cdf(-d1)
-        delta = _N.cdf(d1) - 1.0
-    gamma = _N.pdf(d1) / (spot * sq)
-    return price, delta, gamma
-
-
-# ---------------------------------------------------------------------------
-# 2. Market data: returns a DataFrame with columns [spot, vol]
+# 1. Market data: returns a DataFrame with columns [spot, vol]
 # ---------------------------------------------------------------------------
 
 def download_close(ticker, start, end, interval="1d") -> pd.Series:
@@ -119,7 +90,7 @@ def load_market_data(cfg) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# 3. Episodes: one option's life = n_steps+1 consecutive prices
+# 2. Episodes: one option's life = n_steps+1 consecutive prices
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -144,7 +115,7 @@ def make_episodes(df: pd.DataFrame, n_steps: int, stride: int) -> list[Episode]:
 
 
 # ---------------------------------------------------------------------------
-# 4. The hedging environment
+# 3. The hedging environment
 # ---------------------------------------------------------------------------
 
 class HedgingEnv:
@@ -167,7 +138,7 @@ class HedgingEnv:
         self.t = 0
         self.strike = self.moneyness * episode.spots[0]
         self.position = 0.0
-        self.premium = self._price()[0]
+        self.premium = float(self._price()[0])
         self.cash = self.premium               # we sold the option, so we receive its price
         self.pnl = 0.0                          # cash + shares - option value = 0 at the start
         self.total_cost = 0.0
@@ -217,14 +188,15 @@ class HedgingEnv:
         price, delta, gamma = self._price()
         return Observation(
             step=self.t, steps_left=self.n_steps - self.t, tau=(self.n_steps - self.t) * self.dt,
-            spot=self.ep.spots[self.t], strike=self.strike, vol=self.ep.vols[self.t], rate=self.rate,
-            option_price=price, delta=delta, gamma=gamma,
+            spot=self.ep.spots[self.t], strike=self.strike, is_call=self.kind == "call",
+            vol=self.ep.vols[self.t], rate=self.rate, cost_rate=self.cost_rate,
+            option_price=float(price), delta=float(delta), gamma=float(gamma),
             position=self.position, cash=self.cash, pnl=self.pnl,
         )
 
 
 # ---------------------------------------------------------------------------
-# 5. Running strategies, metrics, plots
+# 4. Running strategies, metrics, plots
 # ---------------------------------------------------------------------------
 
 def run_episode(env: HedgingEnv, strategy: Strategy, episode: Episode) -> dict:
@@ -281,6 +253,7 @@ def plot(results: pd.DataFrame, example: dict, labels: list[str], title: str, pa
     ax.set_xlabel(r"final P&L per option (\$, underlying starts at \$100)")
     ax.set_title("Final P&L across episodes\n(box = 25-75%, whiskers = 5-95%)", loc="left", fontsize=10)
     ax.grid(axis="x", color="#e7e6e2", linewidth=0.8)
+    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=6))
 
     # (b) one example episode: the price path
     first = next(iter(example.values()))

@@ -1,5 +1,6 @@
 """
 The strategy interface: what a hedging strategy SEES (Observation) and what it DOES (act).
+Also the Black-Scholes formula, since both the backtester and some strategies need it.
 
 Setup (same for every strategy):
   - At step 0 we SELL one option on one share and receive its premium in cash.
@@ -16,6 +17,30 @@ strategies/__init__.py. That's it.
 from dataclasses import dataclass, astuple, fields
 
 import numpy as np
+from scipy.special import ndtr  # standard normal CDF N(x); works on whole arrays at once
+
+
+def black_scholes(spot, strike, tau, vol, rate, kind="call"):
+    """Price, delta and gamma of a European option. `spot` can be a number or a numpy array
+    (e.g. many simulated scenarios at once). tau = years to maturity; at tau == 0 this
+    returns the payoff (and a 0/1 delta)."""
+    spot = np.asarray(spot, dtype=float)
+    if tau <= 0 or vol <= 0:
+        if kind == "call":
+            return np.maximum(spot - strike, 0.0), 1.0 * (spot > strike), 0.0 * spot
+        return np.maximum(strike - spot, 0.0), -1.0 * (spot < strike), 0.0 * spot
+    sq = vol * np.sqrt(tau)
+    d1 = (np.log(spot / strike) + (rate + 0.5 * vol**2) * tau) / sq
+    d2 = d1 - sq
+    disc = np.exp(-rate * tau)
+    if kind == "call":
+        price = spot * ndtr(d1) - strike * disc * ndtr(d2)
+        delta = ndtr(d1)
+    else:
+        price = strike * disc * ndtr(-d2) - spot * ndtr(-d1)
+        delta = ndtr(d1) - 1.0
+    gamma = np.exp(-0.5 * d1**2) / np.sqrt(2 * np.pi) / (spot * sq)
+    return price, delta, gamma
 
 
 @dataclass(frozen=True)
@@ -27,14 +52,20 @@ class Observation:
     tau: float            # time to maturity in years
     spot: float           # underlying price (each episode is rescaled so it starts at 100)
     strike: float         # option strike price
+    is_call: bool         # True = we sold a call, False = we sold a put
     vol: float            # volatility estimate used for pricing (implied or realized), annualized
     rate: float           # risk-free interest rate, annualized
+    cost_rate: float      # trading cost per $ traded (cost_bps / 10000)
     option_price: float   # Black-Scholes value of the option right now
     delta: float          # Black-Scholes delta = shares to hold to be locally hedged
     gamma: float          # how fast delta changes when spot moves
     position: float       # shares currently held (before this step's trade)
     cash: float           # cash account (premium received +/- trades, with interest)
     pnl: float            # mark-to-market P&L so far: cash + position*spot - option_price
+
+    @property
+    def kind(self) -> str:
+        return "call" if self.is_call else "put"
 
     def to_array(self) -> np.ndarray:
         """Flat float vector, in field order (handy as a neural-net input later)."""

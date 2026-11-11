@@ -9,9 +9,9 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 ## Files
 | file | what it is |
 |---|---|
-| `backtest.py` | everything that isn't a strategy: Black-Scholes, data loading, episodes, `HedgingEnv`, metrics, plot, CLI |
-| `strategy.py` | the interface: `Observation` (what a strategy sees) and `Strategy` (`reset()`, `act(obs) -> shares`) |
-| `strategies/` | concrete strategies + the name → class registry in `__init__.py` |
+| `backtest.py` | everything that isn't a strategy: data loading, episodes, `HedgingEnv`, metrics, plot, CLI |
+| `strategy.py` | the interface: `Observation` (what a strategy sees) and `Strategy` (`reset()`, `act(obs) -> shares`), plus the `black_scholes` formula |
+| `strategies/` | concrete strategies + the name → class registry in `__init__.py`: `baselines.py` (no hedge, delta, delta band), `mpc.py` (model predictive control, single shooting) |
 | `configs/` | one JSON per experiment |
 
 New to options? Read [`GLOSSARY.md`](GLOSSARY.md) first: every term, with a worked example.

@@ -148,12 +148,12 @@ Read it top to bottom; later terms build on earlier ones. Section 8 is a fully w
   d1 = [ln(S/K) + (r + σ²/2)·τ] / (σ·√τ),   d2 = d1 − σ·√τ
   ```
 - **Intuition:** The key insight is that under those assumptions, you can perfectly **replicate** the option by continuously holding the right number of shares (delta). If you can replicate it exactly, its fair price must be the cost of replicating it. Our project lives in the gap where those assumptions *fail* (vol changes, trading is discrete and costs money).
-- **In the code:** `black_scholes(spot, strike, tau, vol, rate, kind)` returns `(price, delta, gamma)`.
+- **In the code:** `black_scholes(spot, strike, tau, vol, rate, kind)` in `strategy.py` returns `(price, delta, gamma)`. `spot` can be a numpy array, to price many simulated scenarios at once (the MPC strategy does this).
 
 ### N(·): the standard normal CDF
 - **Technical:** `N(x)` = probability that a standard normal random variable is ≤ x. Ranges from 0 to 1.
 - **Intuition:** In Black-Scholes it shows up as a "probability-like" weight; for example, `N(d2)` is roughly the (risk-neutral) probability the call finishes in-the-money.
-- **In the code:** `_N.cdf(...)` using Python's built-in `statistics.NormalDist`.
+- **In the code:** `ndtr(...)` from `scipy.special`.
 
 ### Risk-free rate (r)
 - **Technical:** The interest rate on a riskless loan (in practice, short-term US government bonds), annualized.
