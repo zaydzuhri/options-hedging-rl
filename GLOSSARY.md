@@ -23,9 +23,14 @@ Read it top to bottom; later terms build on earlier ones. Section 8 is a fully w
   - **Mark-to-market P&L** (see §6): the P&L *during* the episode, using today's estimated option value. It's a "paper" number that can still change.
 - **In the code:** `obs.pnl` (running), `env.pnl` at the end of an episode (final), the `pnl` column in `episodes.csv`. The env's `reward` is the *change* in P&L over one step.
 
-### Why we want P&L near zero (not as large as possible)
-- **Technical:** The goal of hedging is to make final P&L have **low variance** (be predictable), not to maximize its mean.
-- **Intuition:** When we sell an option, the premium is supposed to be the fair price for the risk. A trader doing this is like an insurance company: they want to collect the fee and *not* gamble on where the stock goes. A strategy that sometimes makes +10 and sometimes −10 is a bad hedge even if it averages +0.5. A strategy that always lands at +0.2 is a great hedge.
+### What we want P&L to look like: high on average AND predictable
+- **Technical:** We maximize a **risk-adjusted objective** over the distribution of final P&L across episodes:
+  ```
+  maximize   E[P&L] − λ · Risk[P&L]        (Risk = std, variance, or CVaR; λ = risk aversion)
+  ```
+  The mean is good; the spread is bad; λ says how many dollars of average profit you'd give up to remove one unit of risk.
+- **Intuition:** A trader selling options is like an insurance company: collect the fee, don't gamble on where the stock goes. A strategy that sometimes makes +10 and sometimes −10 is a bad hedge even if it averages +0.5. A strategy that always lands at +0.2 is a great hedge, and one that always lands at +0.3 is better still.
+- **Where "near zero" comes from:** in the ideal Black-Scholes world (option priced at the true vol, free continuous trading), a perfect hedge ends at *exactly* 0 every time. So "P&L ≈ 0 in every episode" describes a perfect hedge *in that world*. Zero itself is not the target; *tightness* is. In real data the centre of the distribution moves away from 0 for reasons the hedger mostly doesn't control (premium vs. realized vol, see "Volatility risk premium"), and costs pull it down.
 
 ---
 
@@ -273,7 +278,7 @@ Read it top to bottom; later terms build on earlier ones. Section 8 is a fully w
 - **In the code:** `obs.option_price` is the model value; `obs.pnl` is the MTM P&L.
 
 ### Hedging error
-- **Technical:** The final P&L of a hedged short option. In a perfect world it's 0, so any deviation is "error".
+- **Technical:** The final P&L of a hedged short option. In the ideal Black-Scholes world it's 0, so any deviation is "error". Some methods minimize mean squared hedging error `E[P&L²] = Var[P&L] + (E[P&L])²`, which literally targets 0 and treats profit as error too. That's the *replication* view. We use the risk-adjusted view instead (see §1), where profit counts as good.
 - **Intuition:** How much the hedge failed to cancel the option, in dollars.
 
 ---

@@ -20,9 +20,9 @@ New to options? Read [`GLOSSARY.md`](GLOSSARY.md) first: every term, with a work
 We **sell** one option (a call: the buyer can buy one share at the *strike* K at expiry, so we owe `max(S_T − K, 0)`). We get paid a *premium* upfront. If the stock rallies we lose a lot, so we **hedge** by holding some shares of the stock: when the stock goes up, the shares gain value, which offsets what we'll owe. The Black-Scholes **delta** says how many shares to hold right now so that small price moves cancel out. Delta changes as price and time move, so we have to keep trading, and each trade costs money. That trade-off (stay close to delta vs. avoid paying costs) is the control problem.
 
 **Episode** = one option's life (e.g. 21 trading days ≈ 1 month). At each step the strategy outputs a target number of shares; at expiry we pay the payoff and sell off the shares.
-**Final P&L** = premium + share gains − payoff − costs. A perfect hedge has P&L ≈ 0 in every episode, so we judge strategies by how *spread out* P&L is (`std_pnl`, `cvar_5%` = average of the worst 5% of episodes) as well as by the average.
+**Final P&L** = premium + share gains − payoff − costs. We judge strategies by a risk-adjusted trade-off: high average P&L (`mean_pnl`) and low spread (`std_pnl`, `cvar_5%` = average of the worst 5% of episodes). In the ideal Black-Scholes world a perfect hedge ends at exactly 0 every episode; on real data the centre moves, but tightness is still the main job of the hedge.
 
-**Why the options are synthetic:** Yahoo has no historical option prices, only real stock (and VIX) prices. So at each start date we *pretend* to sell an option priced by Black-Scholes using a volatility estimate (`vol` in the config), then let the **real** price path play out. When the estimate is wrong (it always is, somewhat), delta hedging is imperfect, and that's where a learned policy could do better.
+**Why the options are synthetic:** Yahoo has no historical option prices, only real stock (and VIX) prices. So at each start date we *pretend* to sell an option priced by Black-Scholes using a volatility estimate (`vol` in the config), then let the **real** price path play out. When the estimate is wrong (it always is, somewhat), delta hedging is imperfect, and that's where a learned policy could do better. With `"vol": {"type": "implied"}` the estimate is the one the market actually used for that stock on that day, so the premium is close to what you'd really have been paid (minus the bid/ask spread, which we don't model).
 
 ## Config reference
 ```jsonc
@@ -33,6 +33,9 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
   "vol": {"type": "ticker", "ticker": "^VIX", "scale": 0.01},   // vol used to price the option + compute delta
   //   or {"type": "realized", "window": 21}   trailing realized vol
   //   or {"type": "constant", "value": 0.2}
+  //   or {"type": "implied", "symbol": "AAPL", "max_stale_days": 7}   the market's real ~30-day at-the-money
+  //      implied vol for that stock, from DoltHub (free, US stocks, 2019-02 onward; see configs/aapl_implied.json).
+  //      Gaps up to max_stale_days are filled with the last value; options overlapping longer gaps are skipped.
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},   // moneyness = strike / starting price
   "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},    // cost_bps: 5 = 0.05% of each $ traded
   "episodes": {"stride": 5},               // start a new option every 5 steps (default: no overlap)

@@ -11,7 +11,7 @@ File layout (top to bottom; Black-Scholes pricing lives in strategy.py):
 
 Why the option is "synthetic": Yahoo only has TODAY's option prices, not historical ones.
 So we take the real historical stock path and pretend we sold an option at each start date,
-priced with Black-Scholes using a volatility estimate (VIX, trailing realized vol, or a
+priced with Black-Scholes using a volatility estimate (VIX, the stock's own implied vol, trailing realized vol, or a
 constant). The real path then decides how well the hedge actually worked.
 """
 
@@ -53,6 +53,44 @@ def download_close(ticker, start, end, interval="1d") -> pd.Series:
     return close
 
 
+def download_implied_vol(symbol) -> pd.Series:
+    """Daily ~30-day at-the-money implied vol of one US stock (e.g. 0.21 = 21%), from the free
+    community database DoltHub post-no-preference/options (table volatility_history, column
+    iv_current; coverage starts 2019-02, not every trading day). Cached to data_cache/ as CSV;
+    delete the file to refresh.
+
+    One request per year, ~1 s apart. The table is keyed by (date, symbol), so we list every
+    date of the year explicitly: that makes each row a direct lookup. A plain date range would
+    scan every symbol on every date (~30 s per year, close to the server's timeout)."""
+    import datetime
+    import time
+    import urllib.parse
+    import urllib.request
+
+    CACHE_DIR.mkdir(exist_ok=True)
+    path = CACHE_DIR / f"dolthub_iv_{symbol}.csv"
+    if path.exists():
+        return pd.read_csv(path, index_col=0, parse_dates=True)["iv"]
+    url = "https://www.dolthub.com/api/v1alpha1/post-no-preference/options/master?q="
+    rows = []
+    for year in range(2019, datetime.date.today().year + 1):
+        dates = ",".join(f"'{d.date()}'" for d in pd.date_range(f"{year}-01-01", f"{year}-12-31"))
+        sql = f"SELECT date, iv_current FROM volatility_history WHERE act_symbol = '{symbol}' AND date IN ({dates})"
+        req = urllib.request.Request(url + urllib.parse.quote(sql), headers={"User-Agent": "options-hedging-backtester"})
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            out = json.load(resp)
+        if out.get("query_execution_status") != "Success":
+            raise RuntimeError(f"DoltHub query failed: {out.get('query_execution_message')}")
+        rows += out.get("rows") or []
+        time.sleep(1)
+    if not rows:
+        raise ValueError(f"DoltHub has no implied vol for {symbol!r}")
+    iv = pd.Series({pd.Timestamp(r["date"]): r.get("iv_current") for r in rows}, name="iv")
+    iv = pd.to_numeric(iv, errors="coerce").dropna().sort_index()   # some days have no value
+    iv.to_csv(path)
+    return iv
+
+
 def simulate_gbm(n_steps, s0=100.0, mu=0.0, sigma=0.2, seed=0, steps_per_year=252) -> pd.Series:
     """Geometric Brownian motion: the exact world Black-Scholes assumes. Good sanity check."""
     rng = np.random.default_rng(seed)
@@ -84,9 +122,18 @@ def load_market_data(cfg) -> pd.DataFrame:
     elif vol["type"] == "ticker":     # e.g. ^VIX = market's 30-day implied vol of the S&P 500, in %
         v = download_close(vol["ticker"], data.get("start"), data.get("end"), data.get("interval", "1d"))
         df["vol"] = v.reindex(df.index).ffill() * vol.get("scale", 0.01)
+    elif vol["type"] == "implied":    # the market's own implied vol for this stock (Level A)
+        iv = download_implied_vol(vol.get("symbol", data["ticker"]))
+        # The data skips some days (and early dates fall on weekends), so carry the last known
+        # value forward -- but only for up to max_stale_days calendar days. Longer gaps stay
+        # NaN, and make_episodes skips any option whose life touches one.
+        days = iv.index.union(df.index)
+        last_seen = pd.Series(iv.index, index=iv.index).reindex(days).ffill()
+        fresh = (days - pd.DatetimeIndex(last_seen)).days <= vol.get("max_stale_days", 7)
+        df["vol"] = iv.reindex(days).ffill()[fresh].reindex(df.index)
     else:
-        raise ValueError(f"unknown vol type {vol['type']!r} (use 'constant', 'realized' or 'ticker')")
-    return df.dropna()
+        raise ValueError(f"unknown vol type {vol['type']!r} (use 'constant', 'realized', 'ticker' or 'implied')")
+    return df.loc[df["vol"].first_valid_index():]   # drop the warm-up rows before the first vol value
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +154,8 @@ def make_episodes(df: pd.DataFrame, n_steps: int, stride: int) -> list[Episode]:
     episodes = []
     for i in range(0, len(df) - n_steps, stride):
         s = spot[i:i + n_steps + 1]
+        if np.isnan(vol[i:i + n_steps + 1]).any():   # vol data missing somewhere in this option's life
+            continue
         label = df.index[i].strftime("%Y-%m-%d") if hasattr(df.index[i], "strftime") else str(df.index[i])
         episodes.append(Episode(label, 100.0 * s / s[0], vol[i:i + n_steps + 1]))
     if not episodes:
