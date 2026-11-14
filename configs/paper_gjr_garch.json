@@ -1,0 +1,22 @@
+{
+  "name": "paper_gjr_garch",
+  "data": {
+    "source": "gjr_garch",
+    "n_paths": 1310720,
+    "mu": 0.0053341,
+    "omega": 0.00018216,
+    "alpha": 0.00026564,
+    "gamma": 0.34275732,
+    "beta": 0.70611408,
+    "h0": 0.00196126,
+    "seed": 0
+  },
+  "vol": {"type": "constant", "value": 0.1937},
+  "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 12},
+  "market": {"rate": 0.0, "cost_bps": 0, "steps_per_year": 12},
+  "eval": {"n_splits": 10},
+  "strategies": [
+    {"name": "no_hedge"},
+    {"name": "delta_hedge", "label": "delta_monthly"}
+  ]
+}

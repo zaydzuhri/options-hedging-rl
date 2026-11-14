@@ -99,6 +99,22 @@ def simulate_gbm(n_steps, s0=100.0, mu=0.0, sigma=0.2, seed=0, steps_per_year=25
     return pd.Series(s0 * np.exp(np.concatenate([[0.0], np.cumsum(logret)])), name="close")
 
 
+def simulate_gjr_garch(n_paths, n_steps, mu, omega, alpha, gamma, beta, h0, s0=100.0, seed=0) -> np.ndarray:
+    """Independent GJR-GARCH(1,1) price paths, shape (n_paths, n_steps+1). Per step (e.g. monthly):
+        log-return  Y_t = mu + eps_t,   eps_t = sqrt(h_t) z_t,   z_t ~ N(0, 1)
+        variance    h_{t+1} = omega + (alpha + gamma * 1{eps_t < 0}) eps_t^2 + beta h_t,   h_0 = h0
+    Unlike GBM, volatility moves: it stays high after big moves (clustering) and rises more after
+    drops than after rallies (gamma: the "leverage effect"). The setting of Neagu et al. (2025)."""
+    rng = np.random.default_rng(seed)
+    log_s = np.zeros((n_paths, n_steps + 1))
+    h = np.full(n_paths, float(h0))
+    for t in range(n_steps):
+        eps = np.sqrt(h) * rng.standard_normal(n_paths)
+        log_s[:, t + 1] = log_s[:, t] + mu + eps
+        h = omega + (alpha + gamma * (eps < 0)) * eps**2 + beta * h
+    return s0 * np.exp(log_s)
+
+
 def load_market_data(cfg) -> pd.DataFrame:
     data, vol = cfg["data"], cfg["vol"]
     spy = cfg["market"].get("steps_per_year", 252)
@@ -161,6 +177,23 @@ def make_episodes(df: pd.DataFrame, n_steps: int, stride: int) -> list[Episode]:
     if not episodes:
         raise ValueError(f"not enough data ({len(df)} rows) for options of {n_steps} steps")
     return episodes
+
+
+def load_episodes(cfg) -> tuple[list[Episode], str]:
+    """Episodes plus a one-line description of where they came from. Two kinds of data:
+      - one long price series (yahoo, gbm): sliced into option lifetimes by make_episodes
+      - a set of independent simulated paths (gjr_garch): each path is one episode"""
+    data, n_steps = cfg["data"], cfg["option"]["maturity_steps"]
+    if data["source"] == "gjr_garch":
+        if cfg["vol"]["type"] != "constant":
+            raise ValueError("gjr_garch paths only support a constant pricing vol")
+        paths = simulate_gjr_garch(data["n_paths"], n_steps, data["mu"], data["omega"], data["alpha"],
+                                   data["gamma"], data["beta"], data["h0"], seed=data.get("seed", 0))
+        vols = np.full(n_steps + 1, float(cfg["vol"]["value"]))
+        return [Episode(f"path_{i}", s, vols) for i, s in enumerate(paths)], f"{len(paths)} simulated GJR-GARCH paths"
+    df = load_market_data(cfg)
+    episodes = make_episodes(df, n_steps, cfg.get("episodes", {}).get("stride", n_steps))
+    return episodes, f"{len(df)} data rows ({df.index[0]} -> {df.index[-1]})"
 
 
 # ---------------------------------------------------------------------------
@@ -258,20 +291,33 @@ def run_episode(env: HedgingEnv, strategy: Strategy, episode: Episode) -> dict:
                 n_trades=int(np.sum(np.abs(trades) > 1e-12)), turnover=float(np.sum(np.abs(trades))))
 
 
-def summarize(results: pd.DataFrame) -> pd.DataFrame:
+def rsqp(pnl: np.ndarray) -> float:
+    """Root semi-quadratic penalty sqrt(E[loss^2 * 1{loss > 0}]), loss = -P&L. Like an RMS of the
+    P&L, but only losses count: ending above zero is never penalized. Used by Neagu et al. (2025)."""
+    return float(np.sqrt(np.mean(np.maximum(-pnl, 0.0) ** 2)))
+
+
+def summarize(results: pd.DataFrame, n_splits: int = 1) -> pd.DataFrame:
+    """One row of metrics per strategy. With n_splits > 1 the episodes are cut into that many
+    consecutive groups ("test sets"); rsqp is then the average over groups and rsqp_sd its spread."""
     def cvar(x, q=0.05):  # average of the worst 5% outcomes ("expected shortfall")
         x = np.sort(x.to_numpy())
         return x[: max(1, int(len(x) * q))].mean()
 
     g = results.groupby("strategy", sort=False)
-    return pd.DataFrame({
+    split_rsqp = g["pnl"].apply(lambda x: [rsqp(s) for s in np.array_split(x.to_numpy(), n_splits)])
+    out = pd.DataFrame({
         "mean_pnl": g["pnl"].mean(),
         "std_pnl": g["pnl"].std(),
         "cvar_5%": g["pnl"].apply(cvar),
         "worst": g["pnl"].min(),
+        "rsqp": split_rsqp.apply(np.mean),
         "mean_cost": g["cost"].mean(),
         "mean_trades": g["n_trades"].mean(),
     })
+    if n_splits > 1:
+        out.insert(out.columns.get_loc("rsqp") + 1, "rsqp_sd", split_rsqp.apply(np.std))
+    return out
 
 
 # Categorical palette (fixed order; validated for colorblind-safe adjacent pairs).
@@ -337,12 +383,11 @@ def main():
     name = cfg.get("name", Path(args.config).stem)
 
     opt, mkt = cfg["option"], cfg["market"]
-    df = load_market_data(cfg)
     n_steps = opt["maturity_steps"]
-    episodes = make_episodes(df, n_steps, cfg.get("episodes", {}).get("stride", n_steps))
+    episodes, source = load_episodes(cfg)
     env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
                      mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252))
-    print(f"[{name}] {len(df)} data rows ({df.index[0]} -> {df.index[-1]}), {len(episodes)} episodes "
+    print(f"[{name}] {source}, {len(episodes)} episodes "
           f"of {n_steps} steps, short 1 {opt.get('type', 'call')} at moneyness {opt.get('moneyness', 1.0)}")
 
     rows, example, labels = [], {}, []
@@ -358,7 +403,7 @@ def main():
                 hist.attrs.update(start=ep.start, strike=env.strike)
                 example[label] = hist
     results = pd.DataFrame(rows)
-    summary = summarize(results)
+    summary = summarize(results, cfg.get("eval", {}).get("n_splits", 1))
 
     print(f"mean premium received: {results.premium.mean():.3f}  (all P&L figures in $ per option on $100 of stock)\n")
     print(summary.round(3).to_string())
