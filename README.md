@@ -44,6 +44,14 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
 ```
 Every episode's prices are rescaled to start at $100, so all P&L numbers are "$ per option on $100 of stock".
 
+## Built-in strategies
+| name | what it does | params |
+|---|---|---|
+| `no_hedge` | never trades | |
+| `delta_hedge` | holds Black-Scholes delta | `rebalance_every` |
+| `delta_band` | trades only when the position drifts more than a fixed `band` from delta | `band`, `to_edge` |
+| `whalley_wilmott` | no-trade band around delta whose width comes from costs, gamma and risk aversion (Whalley & Wilmott, 1997); the classical benchmark with costs | `risk_aversion` |
+
 ## Adding a strategy
 ```python
 # strategies/my_idea.py

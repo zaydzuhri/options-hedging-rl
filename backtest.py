@@ -218,7 +218,7 @@ class HedgingEnv:
         return Observation(
             step=self.t, steps_left=self.n_steps - self.t, tau=(self.n_steps - self.t) * self.dt,
             spot=self.ep.spots[self.t], strike=self.strike, vol=self.ep.vols[self.t], rate=self.rate,
-            option_price=price, delta=delta, gamma=gamma,
+            cost_rate=self.cost_rate, option_price=price, delta=delta, gamma=gamma,
             position=self.position, cash=self.cash, pnl=self.pnl,
         )
 

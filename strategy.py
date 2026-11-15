@@ -29,6 +29,7 @@ class Observation:
     strike: float         # option strike price
     vol: float            # volatility estimate used for pricing (implied or realized), annualized
     rate: float           # risk-free interest rate, annualized
+    cost_rate: float      # trading cost per $ traded (cost_bps / 1e4)
     option_price: float   # Black-Scholes value of the option right now
     delta: float          # Black-Scholes delta = shares to hold to be locally hedged
     gamma: float          # how fast delta changes when spot moves
