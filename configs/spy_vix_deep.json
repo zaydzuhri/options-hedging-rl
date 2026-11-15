@@ -1,0 +1,20 @@
+{
+  "name": "spy_vix_deep",
+  "data": {"source": "yahoo", "ticker": "SPY", "start": "2005-01-01", "end": "2025-12-31", "interval": "1d"},
+  "vol": {"type": "ticker", "ticker": "^VIX", "scale": 0.01},
+  "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},
+  "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},
+  "split": {"test_start": "2019-01-01"},
+  "episodes": {"stride": 5},
+  "strategies": [
+    {"name": "no_hedge"},
+    {"name": "delta_hedge", "label": "delta_daily"},
+    {"name": "delta_band", "label": "delta_band_0.1", "params": {"band": 0.1}},
+    {"name": "whalley_wilmott", "label": "ww_g1", "params": {"risk_aversion": 1.0}},
+    {"name": "whalley_wilmott", "label": "ww_g10", "params": {"risk_aversion": 10.0}},
+    {"name": "deep_hedge", "label": "deep_band_cvar", "params": {"model": "models/spy_vix_deep/deep_band_cvar.pt",
+      "arch": "band", "objective": {"type": "cvar", "alpha": 0.05}}},
+    {"name": "deep_hedge", "label": "deep_mlp_cvar", "params": {"model": "models/spy_vix_deep/deep_mlp_cvar.pt",
+      "arch": "mlp", "objective": {"type": "cvar", "alpha": 0.05}}}
+  ]
+}

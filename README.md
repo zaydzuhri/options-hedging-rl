@@ -11,6 +11,7 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 |---|---|
 | `backtest.py` | everything that isn't a strategy: Black-Scholes, data loading, episodes, `HedgingEnv`, metrics, plot, CLI |
 | `strategy.py` | the interface: `Observation` (what a strategy sees) and `Strategy` (`reset()`, `act(obs) -> shares`) |
+| `deep_hedge.py` | deep hedging: differentiable P&L, neural policies, training with CVaR / entropic risk |
 | `strategies/` | concrete strategies + the name → class registry in `__init__.py` |
 | `configs/` | one JSON per experiment |
 
@@ -53,6 +54,7 @@ Every episode's prices are rescaled to start at $100, so all P&L numbers are "$ 
 | `delta_hedge` | holds Black-Scholes delta | `rebalance_every` |
 | `delta_band` | trades only when the position drifts more than a fixed `band` from delta | `band`, `to_edge` |
 | `whalley_wilmott` | no-trade band around delta whose width comes from costs, gamma and risk aversion (Whalley & Wilmott, 1997); the classical benchmark with costs | `risk_aversion` |
+| `deep_hedge` | a neural policy trained by `deep_hedge.py` (see below) | `model` + training params |
 
 ## Adding a strategy
 ```python
@@ -64,6 +66,28 @@ class HalfDelta(Strategy):
         return 0.5 * obs.delta          # target shares to hold until the next step
 ```
 Then register it in `strategies/__init__.py` (`"half_delta": HalfDelta`) and use `{"name": "half_delta"}` in a config.
+
+## Deep hedging
+```bash
+uv run deep_hedge.py --config configs/gbm_costs.json   # trains every "deep_hedge" strategy in the config (~20 s each, CPU)
+uv run backtest.py   --config configs/gbm_costs.json   # evaluates them out of sample next to the baselines
+```
+Our trades don't move the market, so for a fixed price path the final P&L is a differentiable function of the positions. `deep_hedge.py` re-implements `HedgingEnv`'s accounting in PyTorch and backpropagates a risk measure of the P&L through whole episodes (the *pathwise* gradient; Buehler et al., 2019, "Deep hedging"). After training it checks that the backtester gives the same P&L for the trained policy (to ~1e-13).
+
+A `deep_hedge` strategy entry holds both where the checkpoint goes and how to train it:
+```jsonc
+{"name": "deep_hedge", "label": "deep_band", "params": {
+  "model": "models/gbm_costs/deep_band.pt",      // written by deep_hedge.py, read by backtest.py
+  "arch": "band",                                 // "band": learn a no-trade band around delta (Imaki et al., 2021)
+                                                  // "mlp":  position = delta + MLP(features, current position)
+  "objective": {"type": "cvar", "alpha": 0.05},   // or {"type": "entropic", "risk_aversion": 1.0}
+  "steps": 3000, "batch": 1024, "lr": 1e-3, "hidden": 32, "layers": 2, "seed": 0,
+  "train_stride": 1, "val_frac": 0.2              // overlapping training episodes; last 20% of training data picks the checkpoint
+}}
+```
+The config needs a `split`: training uses data before `test_start`, the backtest only data from it on. For `band` policies, `deep_hedge.py` also saves `results/<name>/band_<label>.png`, the learned band next to Whalley-Wilmott's.
+
+Experiments: `gbm_costs.json` (Black-Scholes world with 10 bps costs, where Whalley-Wilmott should be close to optimal) and `spy_vix_deep.json` (SPY priced with VIX, trained on 2005-2018, tested on 2019-2025).
 
 ## Using the environment directly (e.g. for RL later)
 ```python
