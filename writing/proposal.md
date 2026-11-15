@@ -1,6 +1,6 @@
 # Project proposal: Learning the no-trade band
 
-**IFT 6162, Fall 2026.** Team: *(three names)*. Repository: github.com/zaydzuhri/options-hedging-rl
+**IFT 6162, Fall 2026.** Team: *(three names)*. Status: topic approved. Repository: github.com/zaydzuhri/options-hedging-rl
 
 ## System
 A derivatives desk sells an option and hedges it by trading the underlying stock. Each trade pays a proportional cost (bid-ask spread), so the desk must trade off tracking the Black-Scholes delta against paying costs. Starting points: Whalley & Wilmott (1997), the asymptotically optimal no-trade band under proportional costs; Buehler et al. (2019), *Deep hedging*; Kamal & Derman (1999) for the discrete-hedging error we reproduce as a check. Data: daily SPY and VIX from Yahoo Finance, 2005-2025 (train before 2019, test 2019-2025), plus a Black-Scholes simulator where the optimum is computable.
@@ -30,6 +30,5 @@ Tests reproduce the Kamal-Derman hedging error within 10%, check that the traini
 - **SPY 2019-2025:** learned policies improve CVaR 5% from -1.81 (daily delta) to between -0.92 and -1.31. The tail is two events, so the confidence intervals are wide.
 - **Gradients:** the score-function gradient needs roughly 60-500× more episodes than the pathwise gradient for the same accuracy.
 
-## Questions for you
-1. The project page prefers climate, energy, industry, water, food and health. Is option hedging (economics and markets) acceptable? If it helps, we could apply the same method to a commodity hedger (for example, natural-gas exposure) rather than SPY.
-2. Is the synthetic-option setup an acceptable action-response simulator, given that the decisions are scored on real price paths?
+## Status
+The instructor approved the topic (November 2026). This file is kept as a record of the proposal.
