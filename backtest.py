@@ -118,6 +118,20 @@ def load_market_data(cfg) -> pd.DataFrame:
     return df.dropna()
 
 
+def split_train_test(df: pd.DataFrame, split: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Chronological split: rows before `test_start` (a date, or a row number for gbm) are for
+    training, the rest for testing. Episodes are cut separately on each side, so no option's
+    life straddles the boundary. Vol is computed before splitting, which is fine: it only
+    ever looks back."""
+    start = split["test_start"]
+    if isinstance(df.index, pd.DatetimeIndex):
+        start = pd.Timestamp(start, tz=df.index.tz)
+    is_test = df.index >= start
+    if is_test.all() or not is_test.any():
+        raise ValueError(f"test_start={split['test_start']!r} leaves one side of the split empty")
+    return df[~is_test], df[is_test]
+
+
 # ---------------------------------------------------------------------------
 # 3. Episodes: one option's life = n_steps+1 consecutive prices
 # ---------------------------------------------------------------------------
@@ -316,6 +330,9 @@ def main():
 
     opt, mkt = cfg["option"], cfg["market"]
     df = load_market_data(cfg)
+    if "split" in cfg:   # learned strategies trained on the early part: evaluate everyone on the rest
+        train_df, df = split_train_test(df, cfg["split"])
+        print(f"[{name}] out-of-sample evaluation: training rows end at {train_df.index[-1]}")
     n_steps = opt["maturity_steps"]
     episodes = make_episodes(df, n_steps, cfg.get("episodes", {}).get("stride", n_steps))
     env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),

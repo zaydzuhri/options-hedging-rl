@@ -36,6 +36,8 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},   // moneyness = strike / starting price
   "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},    // cost_bps: 5 = 0.05% of each $ traded
   "episodes": {"stride": 5},               // start a new option every 5 steps (default: no overlap)
+  "split": {"test_start": "2019-01-01"},   // optional: evaluate only on data from here on (a row number for gbm);
+                                           //   learned strategies train on what comes before
   "plot_episode": 500,                     // optional: which episode to draw in the plot
   "strategies": [
     {"name": "delta_hedge", "label": "delta_weekly", "params": {"rebalance_every": 5}}
