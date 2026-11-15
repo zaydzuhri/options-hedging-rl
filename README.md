@@ -15,6 +15,7 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 | `dp_optimal.py` | exact dynamic programming in the Black-Scholes world: the optimal no-trade band, a ground truth |
 | `strategies/` | concrete strategies + the name → class registry in `__init__.py` |
 | `configs/` | one JSON per experiment |
+| `tests/` | `uv run pytest` (~10 s, no network): pricing identities, accounting, limits, a published result, parity, DP checks |
 
 New to options? Read [`GLOSSARY.md`](GLOSSARY.md) first: every term, with a worked example.
 
@@ -127,6 +128,21 @@ On `gbm_costs` (20,476 test episodes, entropic risk with a = 1, lower is better)
 | `whalley_wilmott` (a = 1) | 0.3630 | +0.0494 [+0.0438, +0.0552] |
 
 The learned band recovers 97% of the gap between daily delta hedging and the optimum. Whalley-Wilmott's band, derived for continuous trading, is too wide for daily rebalancing and does worse than plain delta hedging.
+
+## Tests: why you can trust the numbers
+```bash
+uv run pytest
+```
+| what | test |
+|---|---|
+| Black-Scholes: put-call parity, delta and gamma are the derivatives of the price, payoff at expiry | `test_pricing.py` |
+| Accounting: rewards sum to the final P&L; unhedged P&L = premium with interest − payoff | `test_env.py` |
+| **Reproduced result**: zero-cost daily delta hedging error has std ≈ √(π/4)·vega·σ/√N (Kamal & Derman, 1999), within 10% | `test_env.py` |
+| Constraints: requests outside the position limits are clipped and counted; learned policies never ask for one | `test_env.py`, `test_deep_hedge.py` |
+| Chronological split never mixes train and test | `test_env.py` |
+| Limiting cases of Whalley-Wilmott: no costs → delta hedge; more risk aversion → narrower band | `test_strategies.py` |
+| The differentiable P&L equals the backtester's (to 1e-10); its gradient equals finite differences | `test_deep_hedge.py` |
+| DP: the solution is a band; no costs → zero width; more costs → wider; grid refinement converges; simulating the DP policy reproduces the DP value and beats delta | `test_dp_optimal.py` |
 
 ## Using the environment directly (e.g. for RL later)
 ```python
