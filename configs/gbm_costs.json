@@ -1,6 +1,6 @@
 {
   "name": "gbm_costs",
-  "data": {"source": "gbm", "n_steps": 100000, "sigma": 0.2, "mu": 0.0, "seed": 0},
+  "data": {"source": "gbm", "n_steps": 500000, "sigma": 0.2, "mu": 0.0, "seed": 0},
   "vol": {"type": "constant", "value": 0.2},
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},
   "market": {"rate": 0.0, "cost_bps": 10, "steps_per_year": 252, "position_limits": [0, 1]},
@@ -11,6 +11,7 @@
     {"name": "delta_hedge", "label": "delta_daily"},
     {"name": "delta_band", "label": "band_0.1_edge", "params": {"band": 0.1, "to_edge": true}},
     {"name": "whalley_wilmott", "label": "ww", "params": {"risk_aversion": 1.0}},
+    {"name": "dp_optimal", "label": "dp_optimal", "params": {"model": "models/gbm_costs/dp.npz", "risk_aversion": 1.0}},
     {"name": "deep_hedge", "label": "deep_band", "params": {"model": "models/gbm_costs/deep_band.pt",
       "arch": "band", "objective": {"type": "entropic", "risk_aversion": 1.0}}},
     {"name": "deep_hedge", "label": "deep_mlp", "params": {"model": "models/gbm_costs/deep_mlp.pt",

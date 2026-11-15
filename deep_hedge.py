@@ -70,15 +70,20 @@ def _mlp(n_in, n_out, hidden, layers):
 
 
 class Policy(nn.Module):
-    """Base: standardizes features with training-set statistics (stored in the checkpoint)."""
+    """Base: standardizes features with training-set statistics and projects the output onto the
+    position limits, so a policy never asks for an infeasible position (both stored in the checkpoint)."""
 
-    def __init__(self, feat_mean, feat_std):
+    def __init__(self, feat_mean, feat_std, limits):
         super().__init__()
         self.register_buffer("feat_mean", feat_mean)
         self.register_buffer("feat_std", torch.where(feat_std > 1e-8, feat_std, 1.0))   # constant vol -> std 0
+        self.register_buffer("limits", torch.as_tensor(limits, dtype=feat_mean.dtype))
 
     def norm(self, feats):
         return (feats - self.feat_mean) / self.feat_std
+
+    def project(self, target):
+        return torch.minimum(torch.maximum(target, self.limits[0]), self.limits[1])
 
 
 class NoTransactionBand(Policy):
@@ -87,8 +92,8 @@ class NoTransactionBand(Policy):
     "don't trade" is built into the architecture (Imaki et al., 2021): the same shape as
     Whalley-Wilmott, with a learned (and possibly asymmetric) width. Starts as a 0.05 band."""
 
-    def __init__(self, feat_mean, feat_std, hidden=32, layers=2, init_width=0.05):
-        super().__init__(feat_mean, feat_std)
+    def __init__(self, feat_mean, feat_std, limits, hidden=32, layers=2, init_width=0.05):
+        super().__init__(feat_mean, feat_std, limits)
         self.net = _mlp(len(FEATURES), 2, hidden, layers)
         nn.init.constant_(self.net[-1].bias, math.log(math.expm1(init_width)))   # softplus^-1
 
@@ -98,20 +103,20 @@ class NoTransactionBand(Policy):
 
     def forward(self, feats, delta, position):
         lo, hi = self.band(feats, delta)
-        return torch.minimum(torch.maximum(position, lo), hi)
+        return self.project(torch.minimum(torch.maximum(position, lo), hi))
 
 
 class MLPHedge(Policy):
     """Unconstrained: target = delta + correction(features, current position).
     The correction starts at zero, so training starts from the daily delta hedge."""
 
-    def __init__(self, feat_mean, feat_std, hidden=32, layers=2):
-        super().__init__(feat_mean, feat_std)
+    def __init__(self, feat_mean, feat_std, limits, hidden=32, layers=2):
+        super().__init__(feat_mean, feat_std, limits)
         self.net = _mlp(len(FEATURES) + 1, 1, hidden, layers)
 
     def forward(self, feats, delta, position):
         x = torch.cat([self.norm(feats), position.unsqueeze(-1)], dim=-1)
-        return delta + self.net(x).squeeze(-1)
+        return self.project(delta + self.net(x).squeeze(-1))
 
 
 ARCHS = {"band": NoTransactionBand, "mlp": MLPHedge}
@@ -190,7 +195,8 @@ def train(fit, val, p, m, log=print):
     """Adam on minibatches of training episodes; keeps the checkpoint with the best validation risk."""
     torch.manual_seed(p["seed"])
     flat = fit["features"].reshape(-1, len(FEATURES))
-    policy = ARCHS[p["arch"]](flat.mean(0), flat.std(0), p["hidden"], p["layers"]).to(DTYPE)
+    limits = m["limits"] if m["limits"] is not None else (-math.inf, math.inf)
+    policy = ARCHS[p["arch"]](flat.mean(0), flat.std(0), limits, p["hidden"], p["layers"]).to(DTYPE)
     optim = torch.optim.Adam(policy.parameters(), lr=p["lr"])
     pnl_of = lambda pol, ep: episode_pnl(pol, ep, m["cost_rate"], m["rate"], 1.0 / m["steps_per_year"], m["limits"])
     with torch.no_grad():
@@ -227,7 +233,8 @@ def save_policy(policy, p, path):
 def load_policy(path):
     ckpt = torch.load(path, weights_only=True)
     state = ckpt["state_dict"]
-    policy = ARCHS[ckpt["arch"]](state["feat_mean"], state["feat_std"], ckpt["hidden"], ckpt["layers"]).to(DTYPE)
+    policy = ARCHS[ckpt["arch"]](state["feat_mean"], state["feat_std"], state["limits"], ckpt["hidden"],
+                                 ckpt["layers"]).to(DTYPE)
     policy.load_state_dict(state)
     return policy.eval()
 
