@@ -126,8 +126,8 @@ path, but the mismatch z can, which is what the fallback does.
 
 ## Results so far (all with trading costs)
 
-Each setting below has a results folder made by the normal runner (`results/<config name>/`: `pnl.png`,
-`summary.csv`, `episodes.csv`, `example_episode.csv`): `gbm_costs`, `gbm_costs_50bps`,
+Each setting below has a results folder made by the normal runner (`results/<config name>/`: `metrics.png`,
+`example.png`, `summary.csv`, `comparison.csv`, `episodes.csv`): `gbm_costs`, `gbm_costs_50bps`,
 `paper_gjr_garch_costs`, `spy_vix_costs`, `ko_costs`, `jnj_costs`, `aapl_realized_costs`. For speed, use `uv run backtest.py --config ... --workers 10`
 (the planners take 0.3–2 s per episode).
 

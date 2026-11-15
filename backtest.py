@@ -7,7 +7,7 @@ File layout (top to bottom; Black-Scholes pricing lives in strategy.py):
   1. Market data                    -> a price series + a volatility series
   2. Episodes                       -> slice the series into one-option-lifetime chunks
   3. HedgingEnv                     -> step-by-step simulation of hedging one option (gym-like)
-  4. Running, metrics, plots, CLI
+  4. Running, metrics, CLI          (the figures are drawn by plots.py)
 
 Why the option is "synthetic": Yahoo only has TODAY's option prices, not historical ones.
 So we take the real historical stock path and pretend we sold an option at each start date,
@@ -205,14 +205,22 @@ class HedgingEnv:
     of shares to hold. Gym-style:  obs = env.reset(episode);  obs, reward, done, info = env.step(a)
 
     reward = change in mark-to-market P&L over the step (after costs). The rewards of an
-    episode sum exactly to its final P&L, so an RL agent can use them directly or reshape."""
+    episode sum exactly to its final P&L minus the day-one markup (0 unless vol_markup is set),
+    so an RL agent can use them directly or reshape.
 
-    def __init__(self, option_type="call", moneyness=1.0, rate=0.0, cost_bps=0.0, steps_per_year=252):
+    vol_markup: we charge the buyer more than the fair price, as a market maker would, by pricing
+    the premium at vol + vol_markup (0.02 = 2 vol points), or "leland" for Leland's (1985) cost-
+    covering vol (see _markup). The liability is still marked at the fair vol, so the extra premium
+    shows up as P&L the moment we sell. Every strategy's final P&L shifts up by the same amount."""
+
+    def __init__(self, option_type="call", moneyness=1.0, rate=0.0, cost_bps=0.0, steps_per_year=252,
+                 vol_markup=0.0):
         self.kind = option_type
         self.moneyness = moneyness            # strike / initial spot
         self.rate = rate
         self.cost_rate = cost_bps / 1e4        # cost per $ traded
         self.dt = 1.0 / steps_per_year
+        self.vol_markup = vol_markup
 
     def reset(self, episode: Episode) -> Observation:
         self.ep = episode
@@ -220,9 +228,10 @@ class HedgingEnv:
         self.t = 0
         self.strike = self.moneyness * episode.spots[0]
         self.position = 0.0
-        self.premium = float(self._price()[0])
+        fair = float(self._price()[0])
+        self.premium = float(self._price(self._markup())[0])   # what the buyer pays us
         self.cash = self.premium               # we sold the option, so we receive its price
-        self.pnl = 0.0                          # cash + shares - option value = 0 at the start
+        self.pnl = self.premium - fair          # cash + shares - option value: 0 unless we charged a markup
         self.total_cost = 0.0
         self.history = []
         return self._observe()
@@ -262,9 +271,18 @@ class HedgingEnv:
                                      position=0.0, trade=0.0, cost=cost, pnl=self.pnl))
         return self._observe(), reward, done, info
 
-    def _price(self):
+    def _price(self, extra_vol=0.0):
         tau = (self.n_steps - self.t) * self.dt
-        return black_scholes(self.ep.spots[self.t], self.strike, tau, self.ep.vols[self.t], self.rate, self.kind)
+        return black_scholes(self.ep.spots[self.t], self.strike, tau, self.ep.vols[self.t] + extra_vol, self.rate, self.kind)
+
+    def _markup(self) -> float:
+        """Vol points added to the fair vol when pricing the premium. "leland": Leland (1985),
+        sigma_L = sigma * sqrt(1 + sqrt(2/pi) * k / (sigma * sqrt(dt))) with k = 2 * cost_rate (a round trip),
+        the vol at which the premium pays, on average, for rebalancing a delta hedge every step."""
+        if self.vol_markup != "leland":
+            return float(self.vol_markup)
+        sig = self.ep.vols[0]
+        return sig * (math.sqrt(1 + math.sqrt(2 / math.pi) * 2 * self.cost_rate / (sig * math.sqrt(self.dt))) - 1)
 
     def _observe(self) -> Observation:
         price, delta, gamma = self._price()
@@ -278,7 +296,7 @@ class HedgingEnv:
 
 
 # ---------------------------------------------------------------------------
-# 4. Running strategies, metrics, plots
+# 4. Running strategies, metrics, CLI
 # ---------------------------------------------------------------------------
 
 def run_episode(env: HedgingEnv, strategy: Strategy, episode: Episode) -> dict:
@@ -330,68 +348,13 @@ def summarize(results: pd.DataFrame, n_splits: int = 1, risk_aversion: float | N
     return out
 
 
-# Categorical palette (fixed order; validated for colorblind-safe adjacent pairs).
-PALETTE = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
-
-
-def plot(results: pd.DataFrame, example: dict, labels: list[str], title: str, path: Path):
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    colors = {lab: PALETTE[i] if i < len(PALETTE) else "#8a8984" for i, lab in enumerate(labels)}
-    plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False,
-                         "axes.edgecolor": "#b5b4ae", "axes.labelcolor": "#52514e",
-                         "xtick.color": "#52514e", "ytick.color": "#52514e"})
-    fig = plt.figure(figsize=(13, 6.5), facecolor="#fcfcfb")
-    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1.3], height_ratios=[1, 1.6], hspace=0.35, wspace=0.3)
-
-    # (a) distribution of final P&L per strategy
-    ax = fig.add_subplot(gs[:, 0])
-    data = [results.loc[results.strategy == lab, "pnl"].to_numpy() for lab in labels][::-1]
-    bp = ax.boxplot(data, orientation="horizontal", whis=(5, 95), showfliers=False, patch_artist=True,
-                    widths=0.5, medianprops=dict(color="#0b0b0b", linewidth=1.5))
-    for patch, lab in zip(bp["boxes"], labels[::-1]):
-        patch.set(facecolor=colors[lab], alpha=0.85, edgecolor="none")
-    ax.set_yticks(range(1, len(labels) + 1), labels[::-1])
-    ax.axvline(0, color="#b5b4ae", linewidth=1, zorder=0)
-    ax.set_xlabel(r"final P&L per option (\$, underlying starts at \$100)")
-    ax.set_title("Final P&L across episodes\n(box = 25-75%, whiskers = 5-95%)", loc="left", fontsize=10)
-    ax.grid(axis="x", color="#e7e6e2", linewidth=0.8)
-    ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=6))
-
-    # (b) one example episode: the price path
-    first = next(iter(example.values()))
-    ax = fig.add_subplot(gs[0, 1])
-    ax.plot(first.step, first.spot, color="#52514e", linewidth=2)
-    ax.axhline(first.attrs["strike"], color="#b5b4ae", linestyle="--", linewidth=1)
-    ax.text(first.step.iloc[-1], first.attrs["strike"], " strike", va="center", color="#52514e", fontsize=9)
-    ax.set_ylabel(r"spot (\$)")
-    ax.set_title(f"Example episode starting {first.attrs['start']}", loc="left", fontsize=10)
-    ax.grid(axis="y", color="#e7e6e2", linewidth=0.8)
-
-    # (c) the same episode: hedge position chosen by each strategy vs Black-Scholes delta
-    ax = fig.add_subplot(gs[1, 1], sharex=ax)
-    ax.plot(first.step, first.delta, color="#0b0b0b", linestyle=":", linewidth=2, label="BS delta")
-    for lab, hist in example.items():
-        ax.step(hist.step, hist.position, where="post", color=colors[lab], linewidth=2, label=lab)
-    ax.set_xlabel("step")
-    ax.set_ylabel("shares held")
-    ax.legend(frameon=False, fontsize=9, loc="upper left", bbox_to_anchor=(1.01, 1))
-    ax.grid(axis="y", color="#e7e6e2", linewidth=0.8)
-
-    fig.suptitle(title, x=0.01, ha="left", fontsize=12, fontweight="bold")
-    fig.savefig(path, dpi=130, bbox_inches="tight", facecolor=fig.get_facecolor())
-    plt.close(fig)
-
-
 def _run_chunk(job):
     """Worker for --workers: one strategy on episodes [lo, hi). Rebuilds the episodes from the config
     (cached / seeded, so identical in every process)."""
     cfg, s, lo, hi = job
     opt, mkt = cfg["option"], cfg["market"]
     env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
-                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252))
+                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252), opt.get("vol_markup", 0.0))
     strategy = STRATEGIES[s["name"]](**s.get("params", {}))
     label = s.get("label", s["name"])
     return [dict(strategy=label, **run_episode(env, strategy, ep)) for ep in load_episodes(cfg)[0][lo:hi]]
@@ -410,11 +373,11 @@ def main():
     n_steps = opt["maturity_steps"]
     episodes, source = load_episodes(cfg)
     env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
-                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252))
+                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252), opt.get("vol_markup", 0.0))
     print(f"[{name}] {source}, {len(episodes)} episodes "
           f"of {n_steps} steps, short 1 {opt.get('type', 'call')} at moneyness {opt.get('moneyness', 1.0)}")
 
-    rows, example, labels = [], {}, []
+    rows, example = [], {}
     ex_idx = cfg.get("plot_episode", len(episodes) // 2)
     if args.workers > 1:
         from concurrent.futures import ProcessPoolExecutor
@@ -426,16 +389,13 @@ def main():
     for s in cfg["strategies"]:
         label = s.get("label", s["name"])
         strategy = STRATEGIES[s["name"]](**s.get("params", {}))
-        labels.append(label)
         todo = enumerate(episodes) if args.workers <= 1 else [(ex_idx, episodes[ex_idx])]
         for i, ep in todo:
             r = dict(strategy=label, **run_episode(env, strategy, ep))
             if args.workers <= 1:
                 rows.append(r)
             if i == ex_idx:
-                hist = pd.DataFrame(env.history)
-                hist.attrs.update(start=ep.start, strike=env.strike)
-                example[label] = hist
+                example[label] = pd.DataFrame(env.history)
     results = pd.DataFrame(rows)
     ev = cfg.get("eval", {})
     summary = summarize(results, ev.get("n_splits", 1), ev.get("risk_aversion"))
@@ -449,7 +409,8 @@ def main():
     results.to_csv(out / "episodes.csv", index=False)
     summary.to_csv(out / "summary.csv")
     pd.concat(example, names=["strategy"]).to_csv(out / "example_episode.csv")
-    plot(results, example, labels, f"{name}: {len(episodes)} episodes", out / "pnl.png")
+    from plots import render
+    render(out)                                   # metrics.png, example.png, comparison.csv
     print(f"\nsaved results to {out}/")
 
 

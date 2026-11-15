@@ -4,12 +4,18 @@
 uv sync
 uv run backtest.py --config configs/spy_vix.json
 ```
-Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per strategy × episode), `example_episode.csv` (step-by-step trajectory), `pnl.png`, and a copy of the config.
+Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per strategy × episode), `example_episode.csv` (step-by-step trajectory), a copy of the config, and two figures drawn by `plots.py`:
+- `metrics.png`: final P&L across episodes as a box plot, then every metric per strategy (mean, std, CVaR, CE, RSQP,
+  cost, trades) as a box showing how much it would move with other episodes, next to the baseline (numbers in `comparison.csv`)
+- `example.png`: one episode, the price and each strategy's shares next to Black-Scholes delta
+
+To re-draw finished runs without re-running them: `uv run plots.py results/<name> [results/<other> ...]`.
 
 ## Files
 | file | what it is |
 |---|---|
-| `backtest.py` | everything that isn't a strategy: data loading, episodes, `HedgingEnv`, metrics, plot, CLI |
+| `backtest.py` | everything that isn't a strategy: data loading, episodes, `HedgingEnv`, metrics, CLI |
+| `plots.py` | the figures (and `comparison.csv`), drawn from a results folder |
 | `strategy.py` | the interface: `Observation` (what a strategy sees) and `Strategy` (`reset()`, `act(obs) -> shares`), plus the `black_scholes` formula |
 | `strategies/` | concrete strategies + the name → class registry in `__init__.py` (each file can be deleted on its own): |
 | ↳ `baselines.py` | `no_hedge`, `delta_hedge`, `delta_band`, `ww_band` (Whalley–Wilmott no-trade band) |
@@ -28,7 +34,7 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
 **Episode** = one option's life (e.g. 21 trading days ≈ 1 month). At each step the strategy outputs a target number of shares; at expiry we pay the payoff and sell off the shares.
 **Final P&L** = premium + share gains − payoff − costs. We judge strategies by a risk-adjusted trade-off: high average P&L (`mean_pnl`) and low spread (`std_pnl`, `cvar_5%` = average of the worst 5% of episodes). `rsqp` = √E[loss² when losing] (loss = −P&L) only penalizes losses; lower is better. In the ideal Black-Scholes world a perfect hedge ends at exactly 0 every episode; on real data the centre moves, but tightness is still the main job of the hedge.
 
-**Why the options are synthetic:** Yahoo has no historical option prices, only real stock (and VIX) prices. So at each start date we *pretend* to sell an option priced by Black-Scholes using a volatility estimate (`vol` in the config), then let the **real** price path play out. When the estimate is wrong (it always is, somewhat), delta hedging is imperfect, and that's where a learned policy could do better. With `"vol": {"type": "implied"}` the estimate is the one the market actually used for that stock on that day, so the premium is close to what you'd really have been paid (minus the bid/ask spread, which we don't model).
+**Why the options are synthetic:** Yahoo has no historical option prices, only real stock (and VIX) prices. So at each start date we *pretend* to sell an option priced by Black-Scholes using a volatility estimate (`vol` in the config), then let the **real** price path play out. When the estimate is wrong (it always is, somewhat), delta hedging is imperfect, and that's where a learned policy could do better. With `"vol": {"type": "implied"}` the estimate is the one the market actually used for that stock on that day, so the premium is close to what you'd really have been paid (minus the bid/ask spread; `option.vol_markup` can add one).
 
 ## Config reference
 ```jsonc
@@ -46,11 +52,17 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
   //      implied vol for that stock, from DoltHub (free, US stocks, 2019-02 onward; see configs/aapl_implied.json).
   //      Gaps up to max_stale_days are filled with the last value; options overlapping longer gaps are skipped.
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},   // moneyness = strike / starting price
+  //   optional "vol_markup": 0.02   charge the buyer the price at vol + 2 vol points, like a market maker's ask,
+  //      instead of the fair price; or "leland": the markup that pays for daily delta-hedging costs on average
+  //      (Leland 1985, about +2.4 vol points at 20 bps). Each episode, every strategy's P&L moves up by the same $,
+  //      so rankings and paired differences don't change (except for the RSQP objective/metric, which only sees losses)
   "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},    // cost_bps: 5 = 0.05% of each $ traded
   "episodes": {"stride": 5},               // start a new option every 5 steps (default: no overlap)
-  "plot_episode": 500,                     // optional: which episode to draw in the plot
+  "plot_episode": 500,                     // optional: which episode to draw in example.png (default: the middle one)
   "eval": {"n_splits": 10, "risk_aversion": 1.0},  // optional: cut episodes into 10 "test sets" (rsqp = their average,
-                                           //   rsqp_sd = spread); risk_aversion g adds ce = -log E[exp(-g P&L)] / g
+                                           //   rsqp_sd = spread); risk_aversion g adds ce = -log E[exp(-g P&L)] / g;
+                                           //   "baseline": a strategy label to compare against in metrics.png
+                                           //   (default: the ww_band strategy, else delta_hedge, else the first)
   "strategies": [
     {"name": "delta_hedge", "label": "delta_weekly", "params": {"rebalance_every": 5}}
   ]
