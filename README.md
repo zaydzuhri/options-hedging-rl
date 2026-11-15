@@ -15,6 +15,9 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 | `dp_optimal.py` | exact dynamic programming in the Black-Scholes world: the optimal no-trade band, a ground truth |
 | `gradient_estimators.py` | pathwise vs score-function (REINFORCE) gradients on the same problem |
 | `garch.py` | GJR-GARCH(1,1) market simulator with bootstrapped residuals, to train on more than one history |
+| `make_site.py` | regenerates the project website's data (`docs/data.js`) and the poster figures (`docs/figures/`) |
+| `docs/` | the project website (one page, GitHub Pages) |
+| `writing/` | drafts of the course proposal and the poster text |
 | `strategies/` | concrete strategies + the name → class registry in `__init__.py` |
 | `configs/` | one JSON per experiment |
 | `tests/` | `uv run pytest` (~10 s, no network): pricing identities, accounting, limits, a published result, parity, DP checks |
@@ -143,7 +146,7 @@ On `gbm_costs` (20,476 test episodes, entropic risk with a = 1, lower is better)
 | `delta_daily` | 0.3607 | +0.0471 [+0.0426, +0.0517] |
 | `whalley_wilmott` (a = 1) | 0.3630 | +0.0494 [+0.0438, +0.0552] |
 
-The learned band recovers 97% of the gap between daily delta hedging and the optimum. Whalley-Wilmott's band, derived for continuous trading, is too wide for daily rebalancing and does worse than plain delta hedging.
+The learned band recovers 97% of the gap between daily delta hedging and the optimum. Whalley-Wilmott's band, derived for continuous trading, is too wide for daily rebalancing: at 10 bps it is no better than plain daily delta hedging (paired difference +0.0023, 95% CI [−0.0062, +0.0114]), at 2 and 5 bps it is worse, and only at 20 bps does it beat delta (`make_site.py` runs all five cost levels).
 
 ## Why not plain RL? Pathwise vs score-function gradients
 ```bash
@@ -152,6 +155,9 @@ uv run gradient_estimators.py --config configs/gbm_costs.json   # ~30 s
 Policy-gradient methods (REINFORCE, PPO) estimate the gradient from which random actions happened to come with good outcomes: the *score function*, E[U · Σ_t ∇log π(u_t | x_t)]. Here the P&L is differentiable in the actions, so we can use the *pathwise* gradient E[∇U] instead. Both are unbiased estimates of the same ∇E[exp(−a·P&L)] for the same Gaussian policy, on the same episodes and noise (the score function even gets a leave-one-out baseline).
 
 On `gbm_costs`, at the initial policy, the score function's relative error is ~23× the pathwise one with exploration noise s = 0.01 shares (~500× more episodes for the same accuracy) and ~8× with s = 0.05 (~60×). With the same Adam optimizer, batch and 1.5 M training episodes, pathwise training reaches validation risk 0.307; REINFORCE barely moves from the starting 0.321 (daily delta: 0.337). Output: `results/gbm_costs/gradient_estimators.png`.
+
+## Project website and poster
+`docs/index.html` is a one-page site with interactive figures (band explorer, closed-loop replay, SPY replay, gradient estimators) driven by precomputed results in `docs/data.js`. Open it directly in a browser, or publish it with GitHub Pages (Settings → Pages → Deploy from a branch → `/docs`). To refresh it after changing the code: train the SPY models and run `gradient_estimators.py` (see above), then `uv run make_site.py` (~6 min). That also writes the poster figures `docs/figures/{bands,risk_vs_cost,spy_cvar,gradient_estimators}.png`.
 
 ## Tests: why you can trust the numbers
 ```bash

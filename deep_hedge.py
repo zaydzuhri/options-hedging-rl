@@ -314,35 +314,40 @@ def main():
     out = Path(cfg.get("output_dir", "results")) / name
     out.mkdir(parents=True, exist_ok=True)
     for s in jobs:
-        label, params = s.get("label", s["name"]), s["params"]
-        p = {**DEFAULTS, **{k: v for k, v in params.items() if k != "model"}}
-        cut = int(len(train_df) * (1 - p["val_frac"]))   # chronological: validation is the latest training data
-        fit_eps = make_episodes(train_df.iloc[:cut], m["n_steps"], p["train_stride"])
-        val_eps = make_episodes(train_df.iloc[cut:], m["n_steps"], p["train_stride"])
-        if p["simulator"]:
-            sim = p["simulator"]
-            if sim.get("type") != "gjr_garch":
-                raise SystemExit(f"unknown simulator {sim.get('type')!r} (use 'gjr_garch')")
-            import garch
-            model = garch.fit(train_df.iloc[:cut])
-            fit_eps = garch.simulate(model, sim.get("n_paths", 100_000), m["n_steps"], sim.get("seed", 0))
-            print(f"  GJR-GARCH fitted on {train_df.index[0]} -> {train_df.index[cut - 1]}: "
-                  + ", ".join(f"{k} {model[k]:.4g}" for k in ["omega", "alpha", "gamma", "beta", "persistence"]))
-        print(f"[{name}] {label}: {p['arch']} policy, objective {p['objective']}, "
-              f"{len(fit_eps)} training / {len(val_eps)} validation episodes")
-        tensors = lambda eps: episode_tensors(eps, m["kind"], m["moneyness"], m["rate"], m["steps_per_year"])
-        policy = train(tensors(fit_eps), tensors(val_eps), p, m)
-        save_policy(policy, p, params["model"])
-        gap = check_parity(params["model"], params, val_eps, m)
-        print(f"  saved {params['model']} (backtester parity: max |Δpnl| = {gap:.1e})")
-        if p["arch"] == "band":
-            obj = p["objective"]
-            ww_gamma = obj.get("risk_aversion", 1.0) if obj.get("type") == "entropic" else 1.0
-            vol = float(np.median(train_df["vol"]))
-            plot_band(policy, m, vol, ww_gamma, f"{name} / {label}: no-trade band at vol {vol:.2f}",
-                      out / f"band_{label}.png")
-            print(f"  band plot: {out / f'band_{label}.png'}")
+        train_entry(s, train_df, m, name, out)
 
+
+def train_entry(entry, train_df, m, name, out, log=print):
+    """Train one "deep_hedge" config entry on `train_df`, save it, check parity, plot its band."""
+    label, params = entry.get("label", entry["name"]), entry["params"]
+    p = {**DEFAULTS, **{k: v for k, v in params.items() if k != "model"}}
+    cut = int(len(train_df) * (1 - p["val_frac"]))   # chronological: validation is the latest training data
+    fit_eps = make_episodes(train_df.iloc[:cut], m["n_steps"], p["train_stride"])
+    val_eps = make_episodes(train_df.iloc[cut:], m["n_steps"], p["train_stride"])
+    if p["simulator"]:
+        sim = p["simulator"]
+        if sim.get("type") != "gjr_garch":
+            raise SystemExit(f"unknown simulator {sim.get('type')!r} (use 'gjr_garch')")
+        import garch
+        model = garch.fit(train_df.iloc[:cut])
+        fit_eps = garch.simulate(model, sim.get("n_paths", 100_000), m["n_steps"], sim.get("seed", 0))
+        log(f"  GJR-GARCH fitted on {train_df.index[0]} -> {train_df.index[cut - 1]}: "
+            + ", ".join(f"{k} {model[k]:.4g}" for k in ["omega", "alpha", "gamma", "beta", "persistence"]))
+    log(f"[{name}] {label}: {p['arch']} policy, objective {p['objective']}, "
+        f"{len(fit_eps)} training / {len(val_eps)} validation episodes")
+    tensors = lambda eps: episode_tensors(eps, m["kind"], m["moneyness"], m["rate"], m["steps_per_year"])
+    policy = train(tensors(fit_eps), tensors(val_eps), p, m, log)
+    save_policy(policy, p, params["model"])
+    gap = check_parity(params["model"], params, val_eps, m)
+    log(f"  saved {params['model']} (backtester parity: max |Δpnl| = {gap:.1e})")
+    if p["arch"] == "band":
+        obj = p["objective"]
+        ww_gamma = obj.get("risk_aversion", 1.0) if obj.get("type") == "entropic" else 1.0
+        vol = float(np.median(train_df["vol"]))
+        out.mkdir(parents=True, exist_ok=True)
+        plot_band(policy, m, vol, ww_gamma, f"{name} / {label}: no-trade band at vol {vol:.2f}", out / f"band_{label}.png")
+        log(f"  band plot: {out / f'band_{label}.png'}")
+    return policy, gap
 
 if __name__ == "__main__":
     main()
