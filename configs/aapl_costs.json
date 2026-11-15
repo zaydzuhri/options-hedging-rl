@@ -86,14 +86,6 @@
         "shared_band": true,
         "n_scenarios": 1024
       }
-    },
-    {
-      "name": "ilqg",
-      "label": "ilqg_H3",
-      "params": {
-        "horizon": 3,
-        "risk_aversion": 1.0
-      }
     }
   ],
   "eval": {

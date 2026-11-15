@@ -152,6 +152,20 @@ def load_market_data(cfg) -> pd.DataFrame:
     return df.loc[df["vol"].first_valid_index():]   # drop the warm-up rows before the first vol value
 
 
+def split_train_test(df: pd.DataFrame, split: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Chronological split: rows before `test_start` (a date, or a row number for gbm) are for
+    training, the rest for testing. Episodes are cut separately on each side, so no option's
+    life straddles the boundary. Vol is computed before splitting, which is fine: it only
+    ever looks back."""
+    start = split["test_start"]
+    if isinstance(df.index, pd.DatetimeIndex):
+        start = pd.Timestamp(start, tz=df.index.tz)
+    is_test = df.index >= start
+    if is_test.all() or not is_test.any():
+        raise ValueError(f"test_start={split['test_start']!r} leaves one side of the split empty")
+    return df[~is_test], df[is_test]
+
+
 # ---------------------------------------------------------------------------
 # 2. Episodes: one option's life = n_steps+1 consecutive prices
 # ---------------------------------------------------------------------------
@@ -181,19 +195,23 @@ def make_episodes(df: pd.DataFrame, n_steps: int, stride: int) -> list[Episode]:
 
 def load_episodes(cfg) -> tuple[list[Episode], str]:
     """Episodes plus a one-line description of where they came from. Two kinds of data:
-      - one long price series (yahoo, gbm): sliced into option lifetimes by make_episodes
+      - one long price series (yahoo, gbm): sliced into option lifetimes by make_episodes; with a
+        "split" in the config, only the test part (learned strategies train on the part before)
       - a set of independent simulated paths (gjr_garch): each path is one episode"""
     data, n_steps = cfg["data"], cfg["option"]["maturity_steps"]
     if data["source"] == "gjr_garch":
-        if cfg["vol"]["type"] != "constant":
-            raise ValueError("gjr_garch paths only support a constant pricing vol")
+        if cfg["vol"]["type"] != "constant" or "split" in cfg:
+            raise ValueError("gjr_garch paths only support a constant pricing vol and no train/test split")
         paths = simulate_gjr_garch(data["n_paths"], n_steps, data["mu"], data["omega"], data["alpha"],
                                    data["gamma"], data["beta"], data["h0"], seed=data.get("seed", 0))
         vols = np.full(n_steps + 1, float(cfg["vol"]["value"]))
         return [Episode(f"path_{i}", s, vols) for i, s in enumerate(paths)], f"{len(paths)} simulated GJR-GARCH paths"
-    df = load_market_data(cfg)
+    df, note = load_market_data(cfg), ""
+    if "split" in cfg:   # learned strategies trained on the early part: evaluate everyone on the rest
+        train_df, df = split_train_test(df, cfg["split"])
+        note = f", out of sample (training rows end at {train_df.index[-1]})"
     episodes = make_episodes(df, n_steps, cfg.get("episodes", {}).get("stride", n_steps))
-    return episodes, f"{len(df)} data rows ({df.index[0]} -> {df.index[-1]})"
+    return episodes, f"{len(df)} data rows ({df.index[0]} -> {df.index[-1]}){note}"
 
 
 # ---------------------------------------------------------------------------
@@ -208,18 +226,22 @@ class HedgingEnv:
     episode sum exactly to its final P&L minus the day-one markup (0 unless vol_markup is set),
     so an RL agent can use them directly or reshape.
 
+    position_limits = (lo, hi) is a hard constraint on the shares held (a risk-desk mandate):
+    a requested position outside it is clipped to it, and the step counts as a violation.
+
     vol_markup: we charge the buyer more than the fair price, as a market maker would, by pricing
     the premium at vol + vol_markup (0.02 = 2 vol points), or "leland" for Leland's (1985) cost-
     covering vol (see _markup). The liability is still marked at the fair vol, so the extra premium
     shows up as P&L the moment we sell. Every strategy's final P&L shifts up by the same amount."""
 
     def __init__(self, option_type="call", moneyness=1.0, rate=0.0, cost_bps=0.0, steps_per_year=252,
-                 vol_markup=0.0):
+                 position_limits=None, vol_markup=0.0):
         self.kind = option_type
         self.moneyness = moneyness            # strike / initial spot
         self.rate = rate
         self.cost_rate = cost_bps / 1e4        # cost per $ traded
         self.dt = 1.0 / steps_per_year
+        self.limits = tuple(position_limits) if position_limits is not None else (-math.inf, math.inf)
         self.vol_markup = vol_markup
 
     def reset(self, episode: Episode) -> Observation:
@@ -240,14 +262,16 @@ class HedgingEnv:
         assert self.t < self.n_steps, "episode is over, call reset()"
         spot = self.ep.spots[self.t]
 
-        # 1) trade from current position to the target position, paying costs
-        trade = float(action) - self.position
+        # 1) trade from current position to the target position (clipped to the limits), paying costs
+        requested = float(action)
+        target = min(max(requested, self.limits[0]), self.limits[1])
+        trade = target - self.position
         cost = self.cost_rate * abs(trade) * spot
         self.cash -= trade * spot + cost
-        self.position = float(action)
+        self.position = target
         self.total_cost += cost
         self.history.append(dict(step=self.t, spot=spot, vol=self.ep.vols[self.t], delta=self._price()[1],
-                                 position=self.position, trade=trade, cost=cost, pnl=self.pnl))
+                                 requested=requested, position=self.position, trade=trade, cost=cost, pnl=self.pnl))
 
         # 2) time passes: interest on cash, market moves
         self.t += 1
@@ -268,7 +292,7 @@ class HedgingEnv:
         info = dict(cost=self.total_cost)
         if done:
             self.history.append(dict(step=self.t, spot=spot, vol=self.ep.vols[self.t], delta=self._price()[1],
-                                     position=0.0, trade=0.0, cost=cost, pnl=self.pnl))
+                                     requested=0.0, position=0.0, trade=0.0, cost=cost, pnl=self.pnl))
         return self._observe(), reward, done, info
 
     def _price(self, extra_vol=0.0):
@@ -304,9 +328,11 @@ def run_episode(env: HedgingEnv, strategy: Strategy, episode: Episode) -> dict:
     obs, done = env.reset(episode), False
     while not done:
         obs, _, done, _ = env.step(strategy.act(obs))
-    trades = [h["trade"] for h in env.history]
+    trades = np.array([h["trade"] for h in env.history])
+    excess = np.array([abs(h["requested"] - h["position"]) for h in env.history])   # > 0: limit was hit
     return dict(start=episode.start, premium=env.premium, pnl=env.pnl, cost=env.total_cost,
-                n_trades=int(np.sum(np.abs(trades) > 1e-12)), turnover=float(np.sum(np.abs(trades))))
+                n_trades=int(np.sum(np.abs(trades) > 1e-12)), turnover=float(np.sum(np.abs(trades))),
+                n_violations=int(np.sum(excess > 1e-9)), max_violation=float(excess.max()))
 
 
 def rsqp(pnl: np.ndarray) -> float:
@@ -341,6 +367,8 @@ def summarize(results: pd.DataFrame, n_splits: int = 1, risk_aversion: float | N
         "mean_cost": g["cost"].mean(),
         "mean_trades": g["n_trades"].mean(),
     })
+    if results["n_violations"].any():   # steps per episode where a position limit was hit
+        out["violations"] = g["n_violations"].mean()
     if n_splits > 1:
         out.insert(out.columns.get_loc("rsqp") + 1, "rsqp_sd", split_rsqp.apply(np.std))
     if risk_aversion:
@@ -348,13 +376,18 @@ def summarize(results: pd.DataFrame, n_splits: int = 1, risk_aversion: float | N
     return out
 
 
+def make_env(cfg) -> HedgingEnv:
+    opt, mkt = cfg["option"], cfg["market"]
+    return HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
+                      mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252), mkt.get("position_limits"),
+                      opt.get("vol_markup", 0.0))
+
+
 def _run_chunk(job):
     """Worker for --workers: one strategy on episodes [lo, hi). Rebuilds the episodes from the config
     (cached / seeded, so identical in every process)."""
     cfg, s, lo, hi = job
-    opt, mkt = cfg["option"], cfg["market"]
-    env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
-                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252), opt.get("vol_markup", 0.0))
+    env = make_env(cfg)
     strategy = STRATEGIES[s["name"]](**s.get("params", {}))
     label = s.get("label", s["name"])
     return [dict(strategy=label, **run_episode(env, strategy, ep)) for ep in load_episodes(cfg)[0][lo:hi]]
@@ -369,11 +402,10 @@ def main():
     cfg = json.loads(Path(args.config).read_text())
     name = cfg.get("name", Path(args.config).stem)
 
-    opt, mkt = cfg["option"], cfg["market"]
+    opt = cfg["option"]
     n_steps = opt["maturity_steps"]
     episodes, source = load_episodes(cfg)
-    env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
-                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252), opt.get("vol_markup", 0.0))
+    env = make_env(cfg)
     print(f"[{name}] {source}, {len(episodes)} episodes "
           f"of {n_steps} steps, short 1 {opt.get('type', 'call')} at moneyness {opt.get('moneyness', 1.0)}")
 

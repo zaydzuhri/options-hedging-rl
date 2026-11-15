@@ -1,4 +1,4 @@
-"""Price models that model-based strategies (dp, mpc, ilqg) plan with. Not the market itself:
+"""Price models that model-based strategies (dp, mpc) plan with. Not the market itself:
 the backtest feeds strategies real or simulated prices; these are the strategy's BELIEF about them.
 
 A model is chosen in a strategy's params, e.g.
@@ -31,11 +31,6 @@ class GBM:
     def vol(self, obs):
         """Annualized vol the model believes in right now."""
         return obs.vol
-
-    def schedule(self, obs, H, dt):
-        """Deterministic summary for local methods (iLQG): per-step log-return mean m_k and std s_k
-        for k < H, and the annualized vol to value the option with at the horizon."""
-        return np.full(H, self.drift(obs) * dt), np.full(H, obs.vol * math.sqrt(dt)), obs.vol
 
     def simulate(self, obs, H, dt, M, rng):
         """M price paths (antithetic pairs) for H steps from obs.spot -> (S, vols), both (M, H+1)."""
@@ -72,17 +67,6 @@ class GJRGarch:
     def vol(self, obs):
         dt = obs.tau / obs.steps_left
         return math.sqrt(self.v / dt)
-
-    def schedule(self, obs, H, dt):
-        """Expected variance path E[v_{k+1}] = omega + (alpha + gamma/2 + beta) E[v_k] (the leverage term is
-        on half the shocks on average); horizon vol = average expected variance over the remaining life."""
-        v = [self.v]
-        for _ in range(obs.steps_left):
-            v.append(self.omega + (self.alpha + 0.5 * self.gamma + self.beta) * v[-1])
-        v = np.array(v)
-        rest = v[H:obs.steps_left]
-        term_vol = math.sqrt(rest.mean() / dt) if len(rest) else math.sqrt(v[H] / dt)
-        return np.full(H, self.mu), np.sqrt(v[:H]), term_vol
 
     def simulate(self, obs, H, dt, M, rng):
         z = rng.standard_normal((M // 2, H))

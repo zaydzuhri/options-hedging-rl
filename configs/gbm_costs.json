@@ -75,31 +75,6 @@
         "shared_band": true,
         "n_scenarios": 1024
       }
-    },
-    {
-      "name": "ilqg",
-      "label": "ilqg_H3",
-      "params": {
-        "horizon": 3,
-        "risk_aversion": 1.0
-      }
-    },
-    {
-      "name": "ilqg",
-      "label": "ilqg_once",
-      "params": {
-        "replan": false,
-        "risk_aversion": 1.0
-      }
-    },
-    {
-      "name": "ilqg",
-      "label": "ilqg_hybrid",
-      "params": {
-        "replan": false,
-        "trust_radius": 2.0,
-        "risk_aversion": 1.0
-      }
     }
   ]
 }

@@ -110,23 +110,6 @@
           "h0": 0.00196126
         }
       }
-    },
-    {
-      "name": "ilqg",
-      "label": "ilqg_H3",
-      "params": {
-        "horizon": 3,
-        "risk_aversion": 0.3,
-        "model": {
-          "type": "gjr_garch",
-          "mu": 0.0053341,
-          "omega": 0.00018216,
-          "alpha": 0.00026564,
-          "gamma": 0.34275732,
-          "beta": 0.70611408,
-          "h0": 0.00196126
-        }
-      }
     }
   ]
 }

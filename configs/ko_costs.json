@@ -84,14 +84,6 @@
         "objective": "cara",
         "risk_aversion": 0.3
       }
-    },
-    {
-      "name": "ilqg",
-      "label": "ilqg_H3",
-      "params": {
-        "horizon": 3,
-        "risk_aversion": 0.3
-      }
     }
   ],
   "eval": {

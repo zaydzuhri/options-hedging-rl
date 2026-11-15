@@ -29,8 +29,8 @@ import pandas as pd
 # three categorical slots are validated colourblind-safe for every pair; light chart surface only.
 SURFACE, INK, INK2, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 SLOTS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
-FAMILY = {"mpc": 0, "dp": 1, "ilqg": 2}
-BASELINES = {"no_hedge", "delta_hedge", "delta_band", "ww_band"}
+FAMILY = {"mpc": 0, "dp": 1, "dp_optimal": 1, "deep_hedge": 2}
+BASELINES = {"no_hedge", "delta_hedge", "delta_band", "ww_band", "whalley_wilmott"}
 
 # key, title, unit, which way is better
 METRICS = [
@@ -78,7 +78,7 @@ def baseline(cfg, labels):
     want = cfg.get("eval", {}).get("baseline")
     if want in labels:
         return want
-    for name in ("ww_band", "delta_hedge"):
+    for name in ("ww_band", "whalley_wilmott", "delta_hedge"):
         for s in cfg["strategies"]:
             if s["name"] == name and s.get("label", s["name"]) in labels:
                 return s.get("label", s["name"])
@@ -180,7 +180,11 @@ def _box(a, y, lo, q1, q3, hi, color, h=0.46):
 
 def plot_metrics(run, table, base, block, path):
     plt = _style()
-    labels, colors, S = run["labels"], family_colors(run["cfg"]), len(run["labels"])
+    # no_hedge is off the scale of every hedged strategy (std ~6x), so it would flatten each panel
+    hidden = [s.get("label", s["name"]) for s in run["cfg"]["strategies"] if s["name"] == "no_hedge" and
+              s.get("label", s["name"]) in run["labels"] and s.get("label", s["name"]) != base]
+    keep = [i for i, lab in enumerate(run["labels"]) if lab not in hidden]
+    labels, colors, S = [run["labels"][i] for i in keep], family_colors(run["cfg"]), len(keep)
     g = run["cfg"].get("eval", {}).get("risk_aversion")
     metrics = [m for m in METRICS if m[0] in set(table.metric)]
     ncol = 3
@@ -202,7 +206,7 @@ def plot_metrics(run, table, base, block, path):
 
     # first panel: the spread of outcomes across episodes (a classic box plot)
     a = panels[0]
-    for yy, lab, x in zip(y, labels, run["P"].T):
+    for yy, lab, x in zip(y, labels, run["P"][:, keep].T):
         q = np.percentile(x, [5, 25, 50, 75, 95])
         _box(a, yy, q[0], q[1], q[3], q[4], colors[lab])
         a.plot([q[2], q[2]], [yy - 0.23, yy + 0.23], color=INK, lw=1.6, zorder=3)
@@ -233,7 +237,8 @@ def plot_metrics(run, table, base, block, path):
                   f"(box: middle 50%, whiskers: 95%; {how}).\n"
                   f"Gray line: the baseline, {base}. Whiskers that\n"
                   "don't reach it: the difference isn't luck.\n"
-                  "Color = method family; gray = baselines.",
+                  "Color = method family; gray = baselines."
+                  + (f"\n{', '.join(hidden)}: not drawn (off scale), see summary.csv." if hidden else ""),
                   xy=(0.0, 1.0), xycoords="axes fraction", xytext=(0, -20), textcoords="offset points",
                   ha="left", va="top", fontsize=9, color=INK2, linespacing=1.45)
     _title(fig, run)
