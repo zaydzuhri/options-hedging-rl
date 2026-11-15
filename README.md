@@ -13,6 +13,7 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 | `strategy.py` | the interface: `Observation` (what a strategy sees) and `Strategy` (`reset()`, `act(obs) -> shares`) |
 | `deep_hedge.py` | deep hedging: differentiable P&L, neural policies, training with CVaR / entropic risk |
 | `dp_optimal.py` | exact dynamic programming in the Black-Scholes world: the optimal no-trade band, a ground truth |
+| `gradient_estimators.py` | pathwise vs score-function (REINFORCE) gradients on the same problem |
 | `strategies/` | concrete strategies + the name → class registry in `__init__.py` |
 | `configs/` | one JSON per experiment |
 | `tests/` | `uv run pytest` (~10 s, no network): pricing identities, accounting, limits, a published result, parity, DP checks |
@@ -128,6 +129,14 @@ On `gbm_costs` (20,476 test episodes, entropic risk with a = 1, lower is better)
 | `whalley_wilmott` (a = 1) | 0.3630 | +0.0494 [+0.0438, +0.0552] |
 
 The learned band recovers 97% of the gap between daily delta hedging and the optimum. Whalley-Wilmott's band, derived for continuous trading, is too wide for daily rebalancing and does worse than plain delta hedging.
+
+## Why not plain RL? Pathwise vs score-function gradients
+```bash
+uv run gradient_estimators.py --config configs/gbm_costs.json   # ~30 s
+```
+Policy-gradient methods (REINFORCE, PPO) estimate the gradient from which random actions happened to come with good outcomes: the *score function*, E[U · Σ_t ∇log π(u_t | x_t)]. Here the P&L is differentiable in the actions, so we can use the *pathwise* gradient E[∇U] instead. Both are unbiased estimates of the same ∇E[exp(−a·P&L)] for the same Gaussian policy, on the same episodes and noise (the score function even gets a leave-one-out baseline).
+
+On `gbm_costs`, at the initial policy, the score function's relative error is ~23× the pathwise one with exploration noise s = 0.01 shares (~500× more episodes for the same accuracy) and ~8× with s = 0.05 (~60×). With the same Adam optimizer, batch and 1.5 M training episodes, pathwise training reaches validation risk 0.307; REINFORCE barely moves from the starting 0.321 (daily delta: 0.337). Output: `results/gbm_costs/gradient_estimators.png`.
 
 ## Tests: why you can trust the numbers
 ```bash
