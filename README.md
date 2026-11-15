@@ -14,6 +14,7 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 | `deep_hedge.py` | deep hedging: differentiable P&L, neural policies, training with CVaR / entropic risk |
 | `dp_optimal.py` | exact dynamic programming in the Black-Scholes world: the optimal no-trade band, a ground truth |
 | `gradient_estimators.py` | pathwise vs score-function (REINFORCE) gradients on the same problem |
+| `garch.py` | GJR-GARCH(1,1) market simulator with bootstrapped residuals, to train on more than one history |
 | `strategies/` | concrete strategies + the name → class registry in `__init__.py` |
 | `configs/` | one JSON per experiment |
 | `tests/` | `uv run pytest` (~10 s, no network): pricing identities, accounting, limits, a published result, parity, DP checks |
@@ -105,12 +106,26 @@ A `deep_hedge` strategy entry holds both where the checkpoint goes and how to tr
                                                   // "mlp":  position = delta + MLP(features, current position)
   "objective": {"type": "cvar", "alpha": 0.05},   // or {"type": "entropic", "risk_aversion": 1.0}
   "steps": 3000, "batch": 1024, "lr": 1e-3, "hidden": 32, "layers": 2, "seed": 0,
-  "train_stride": 1, "val_frac": 0.2              // overlapping training episodes; last 20% of training data picks the checkpoint
+  "train_stride": 1, "val_frac": 0.2,             // overlapping training episodes; last 20% of training data picks the checkpoint
+  "simulator": {"type": "gjr_garch", "n_paths": 100000}   // optional: train on simulated paths instead (see garch.py)
 }}
 ```
 The config needs a `split`: training uses data before `test_start`, the backtest only data from it on. For `band` policies, `deep_hedge.py` also saves `results/<name>/band_<label>.png`, the learned band next to Whalley-Wilmott's.
 
 Experiments: `gbm_costs.json` (Black-Scholes world with 10 bps costs, where Whalley-Wilmott should be close to optimal) and `spy_vix_deep.json` (SPY priced with VIX, trained on 2005-2018, tested on 2019-2025).
+
+### Results on real data (SPY, test 2019-2025, 348 episodes)
+| strategy | CVaR 5% | std | mean P&L | CVaR gain vs daily delta (block-bootstrap 95% CI) |
+|---|---|---|---|---|
+| `delta_daily` | -1.81 | 0.71 | 0.31 | |
+| `delta_band_0.1` | -1.63 | 0.70 | 0.34 | |
+| `whalley_wilmott` (a = 1) | -1.72 | 0.73 | 0.34 | |
+| `deep_band_cvar` | -1.26 | 0.63 | 0.28 | +0.54 [+0.02, +1.12] |
+| `deep_mlp_cvar` | -0.92 | 0.53 | 0.25 | +0.89 [+0.02, +1.80] |
+| `deep_band_cvar_garch` | -1.31 | 0.66 | 0.26 | +0.50 [+0.03, +0.99] |
+| `deep_mlp_cvar_garch` | -1.16 | 0.60 | 0.22 | +0.64 [-0.03, +1.28] |
+
+Read with care. The worst 5% of test episodes come from two events (Feb-Mar 2020 and Mar 2025), so the intervals are wide. The improvement is consistent across seeds (MLP CVaR between -0.86 and -1.02 for 4 seeds) and comes from one behavior: every learned policy holds ~0.1 share *less* than delta when the option is at or in the money, which loses a little in rallies (lower mean P&L) and a lot less in crashes. Policies trained only on simulated GJR-GARCH paths learn the same tilt, so it is not a memorized 2008. Training on the simulator did not beat training on the real history here (MLP: -0.25 CVaR, CI [-0.55, -0.02]).
 
 ## Exact dynamic programming (the ground truth)
 ```bash

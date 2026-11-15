@@ -15,6 +15,10 @@
     {"name": "deep_hedge", "label": "deep_band_cvar", "params": {"model": "models/spy_vix_deep/deep_band_cvar.pt",
       "arch": "band", "objective": {"type": "cvar", "alpha": 0.05}}},
     {"name": "deep_hedge", "label": "deep_mlp_cvar", "params": {"model": "models/spy_vix_deep/deep_mlp_cvar.pt",
-      "arch": "mlp", "objective": {"type": "cvar", "alpha": 0.05}}}
+      "arch": "mlp", "objective": {"type": "cvar", "alpha": 0.05}}},
+    {"name": "deep_hedge", "label": "deep_band_cvar_garch", "params": {"model": "models/spy_vix_deep/deep_band_cvar_garch.pt",
+      "arch": "band", "objective": {"type": "cvar", "alpha": 0.05}, "simulator": {"type": "gjr_garch", "n_paths": 100000}}},
+    {"name": "deep_hedge", "label": "deep_mlp_cvar_garch", "params": {"model": "models/spy_vix_deep/deep_mlp_cvar_garch.pt",
+      "arch": "mlp", "objective": {"type": "cvar", "alpha": 0.05}, "simulator": {"type": "gjr_garch", "n_paths": 100000}}}
   ]
 }

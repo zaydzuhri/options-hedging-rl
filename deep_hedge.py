@@ -179,6 +179,8 @@ DEFAULTS = dict(
     hidden=32, layers=2,
     steps=3000, batch=1024, lr=1e-3, seed=0,
     train_stride=1,                                # overlapping training episodes: more data
+    simulator=None,                                # or {"type": "gjr_garch", "n_paths": 100000, "seed": 0}:
+                                                   #   train on paths from a model fitted to the training period
     val_frac=0.2,                                  # last part of the training period picks the checkpoint
     eval_every=100,
 )
@@ -317,6 +319,15 @@ def main():
         cut = int(len(train_df) * (1 - p["val_frac"]))   # chronological: validation is the latest training data
         fit_eps = make_episodes(train_df.iloc[:cut], m["n_steps"], p["train_stride"])
         val_eps = make_episodes(train_df.iloc[cut:], m["n_steps"], p["train_stride"])
+        if p["simulator"]:
+            sim = p["simulator"]
+            if sim.get("type") != "gjr_garch":
+                raise SystemExit(f"unknown simulator {sim.get('type')!r} (use 'gjr_garch')")
+            import garch
+            model = garch.fit(train_df.iloc[:cut])
+            fit_eps = garch.simulate(model, sim.get("n_paths", 100_000), m["n_steps"], sim.get("seed", 0))
+            print(f"  GJR-GARCH fitted on {train_df.index[0]} -> {train_df.index[cut - 1]}: "
+                  + ", ".join(f"{k} {model[k]:.4g}" for k in ["omega", "alpha", "gamma", "beta", "persistence"]))
         print(f"[{name}] {label}: {p['arch']} policy, objective {p['objective']}, "
               f"{len(fit_eps)} training / {len(val_eps)} validation episodes")
         tensors = lambda eps: episode_tensors(eps, m["kind"], m["moneyness"], m["rate"], m["steps_per_year"])
