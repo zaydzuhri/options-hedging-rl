@@ -3,7 +3,7 @@
   "data": {"source": "gbm", "n_steps": 100000, "sigma": 0.2, "mu": 0.0, "seed": 0},
   "vol": {"type": "constant", "value": 0.2},
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},
-  "market": {"rate": 0.0, "cost_bps": 10, "steps_per_year": 252},
+  "market": {"rate": 0.0, "cost_bps": 10, "steps_per_year": 252, "position_limits": [0, 1]},
   "split": {"test_start": 70000},
   "episodes": {"stride": 21},
   "strategies": [

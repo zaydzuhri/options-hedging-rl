@@ -166,14 +166,19 @@ class HedgingEnv:
     of shares to hold. Gym-style:  obs = env.reset(episode);  obs, reward, done, info = env.step(a)
 
     reward = change in mark-to-market P&L over the step (after costs). The rewards of an
-    episode sum exactly to its final P&L, so an RL agent can use them directly or reshape."""
+    episode sum exactly to its final P&L, so an RL agent can use them directly or reshape.
 
-    def __init__(self, option_type="call", moneyness=1.0, rate=0.0, cost_bps=0.0, steps_per_year=252):
+    position_limits = (lo, hi) is a hard constraint on the shares held (a risk-desk mandate):
+    a requested position outside it is clipped to it, and the step counts as a violation."""
+
+    def __init__(self, option_type="call", moneyness=1.0, rate=0.0, cost_bps=0.0, steps_per_year=252,
+                 position_limits=None):
         self.kind = option_type
         self.moneyness = moneyness            # strike / initial spot
         self.rate = rate
         self.cost_rate = cost_bps / 1e4        # cost per $ traded
         self.dt = 1.0 / steps_per_year
+        self.limits = tuple(position_limits) if position_limits is not None else (-math.inf, math.inf)
 
     def reset(self, episode: Episode) -> Observation:
         self.ep = episode
@@ -192,14 +197,16 @@ class HedgingEnv:
         assert self.t < self.n_steps, "episode is over, call reset()"
         spot = self.ep.spots[self.t]
 
-        # 1) trade from current position to the target position, paying costs
-        trade = float(action) - self.position
+        # 1) trade from current position to the target position (clipped to the limits), paying costs
+        requested = float(action)
+        target = min(max(requested, self.limits[0]), self.limits[1])
+        trade = target - self.position
         cost = self.cost_rate * abs(trade) * spot
         self.cash -= trade * spot + cost
-        self.position = float(action)
+        self.position = target
         self.total_cost += cost
         self.history.append(dict(step=self.t, spot=spot, vol=self.ep.vols[self.t], delta=self._price()[1],
-                                 position=self.position, trade=trade, cost=cost, pnl=self.pnl))
+                                 requested=requested, position=self.position, trade=trade, cost=cost, pnl=self.pnl))
 
         # 2) time passes: interest on cash, market moves
         self.t += 1
@@ -220,7 +227,7 @@ class HedgingEnv:
         info = dict(cost=self.total_cost)
         if done:
             self.history.append(dict(step=self.t, spot=spot, vol=self.ep.vols[self.t], delta=self._price()[1],
-                                     position=0.0, trade=0.0, cost=cost, pnl=self.pnl))
+                                     requested=0.0, position=0.0, trade=0.0, cost=cost, pnl=self.pnl))
         return self._observe(), reward, done, info
 
     def _price(self):
@@ -246,9 +253,11 @@ def run_episode(env: HedgingEnv, strategy: Strategy, episode: Episode) -> dict:
     obs, done = env.reset(episode), False
     while not done:
         obs, _, done, _ = env.step(strategy.act(obs))
-    trades = [h["trade"] for h in env.history]
+    trades = np.array([h["trade"] for h in env.history])
+    excess = np.array([abs(h["requested"] - h["position"]) for h in env.history])   # > 0: limit was hit
     return dict(start=episode.start, premium=env.premium, pnl=env.pnl, cost=env.total_cost,
-                n_trades=int(np.sum(np.abs(trades) > 1e-12)), turnover=float(np.sum(np.abs(trades))))
+                n_trades=int(np.sum(np.abs(trades) > 1e-12)), turnover=float(np.sum(np.abs(trades))),
+                n_violations=int(np.sum(excess > 1e-9)), max_violation=float(excess.max()))
 
 
 def summarize(results: pd.DataFrame) -> pd.DataFrame:
@@ -264,6 +273,7 @@ def summarize(results: pd.DataFrame) -> pd.DataFrame:
         "worst": g["pnl"].min(),
         "mean_cost": g["cost"].mean(),
         "mean_trades": g["n_trades"].mean(),
+        "violations": g["n_violations"].mean(),   # steps per episode where the position limit was hit
     })
 
 
@@ -336,7 +346,7 @@ def main():
     n_steps = opt["maturity_steps"]
     episodes = make_episodes(df, n_steps, cfg.get("episodes", {}).get("stride", n_steps))
     env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
-                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252))
+                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252), mkt.get("position_limits"))
     print(f"[{name}] {len(df)} data rows ({df.index[0]} -> {df.index[-1]}), {len(episodes)} episodes "
           f"of {n_steps} steps, short 1 {opt.get('type', 'call')} at moneyness {opt.get('moneyness', 1.0)}")
 

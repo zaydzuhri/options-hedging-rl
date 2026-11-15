@@ -23,6 +23,23 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
 **Episode** = one option's life (e.g. 21 trading days ≈ 1 month). At each step the strategy outputs a target number of shares; at expiry we pay the payoff and sell off the shares.
 **Final P&L** = premium + share gains − payoff − costs. A perfect hedge has P&L ≈ 0 in every episode, so we judge strategies by how *spread out* P&L is (`std_pnl`, `cvar_5%` = average of the worst 5% of episodes) as well as by the average.
 
+## Control formulation
+One episode is a finite-horizon stochastic control problem with N steps (N = `maturity_steps`), Δt = 1/`steps_per_year`, cost rate λ = `cost_bps`/10⁴, growth factor G = e^{rΔt}.
+
+| | |
+|---|---|
+| **state** x_t | (S_t, σ̂_t, q_t, c_t, t): spot, pricing vol, shares held, cash, time. The strike K and maturity are fixed per episode. |
+| **control** u_t | shares to hold over (t, t+1], within the position limits: q_min ≤ u_t ≤ q_max |
+| **disturbance** w_t | (S_{t+1}/S_t, σ̂_{t+1}): the market's next move, from data or a simulator |
+| **dynamics** | q_{t+1} = u_t,  c_{t+1} = G·(c_t − (u_t − q_t)·S_t − λ·\|u_t − q_t\|·S_t),  (S, σ̂) evolve exogenously |
+| **terminal** | P&L = c_N + q_N·S_N − λ·\|q_N\|·S_N − payoff(S_N), with c_0 = premium and q_0 = 0 |
+| **objective** | minimize a risk measure of the final P&L: CVaR_α or entropic risk (1/a)·log E[e^{−a·P&L}] |
+| **information** | u_t may only depend on what is known at t (`Observation`): no look-ahead |
+
+**Why one decision at a time is not enough.** Without costs (λ = 0), each step can be solved on its own: hold delta, whatever you held before. With costs, today's position is tomorrow's starting point, so q_t is part of the state and a trade now changes what future trades cost. The optimal policy becomes a *no-trade band* around delta whose width depends on the whole remaining horizon. That coupling is what `whalley_wilmott` approximates and `deep_hedge` learns.
+
+**Assumptions.** We are a price taker: our trades don't move S or σ̂, which is what lets us replay historical paths as disturbances (and what makes the P&L differentiable in the actions). Options are synthetic (see below), costs are proportional, and the hedge is settled in shares at expiry.
+
 **Why the options are synthetic:** Yahoo has no historical option prices, only real stock (and VIX) prices. So at each start date we *pretend* to sell an option priced by Black-Scholes using a volatility estimate (`vol` in the config), then let the **real** price path play out. When the estimate is wrong (it always is, somewhat), delta hedging is imperfect, and that's where a learned policy could do better.
 
 ## Config reference
@@ -35,7 +52,9 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
   //   or {"type": "realized", "window": 21}   trailing realized vol
   //   or {"type": "constant", "value": 0.2}
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},   // moneyness = strike / starting price
-  "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},    // cost_bps: 5 = 0.05% of each $ traded
+  "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252,    // cost_bps: 5 = 0.05% of each $ traded
+             "position_limits": [0, 1]},  // optional hard limits on shares held; requests outside are clipped
+                                          //   and counted in the `violations` column
   "episodes": {"stride": 5},               // start a new option every 5 steps (default: no overlap)
   "split": {"test_start": "2019-01-01"},   // optional: evaluate only on data from here on (a row number for gbm);
                                            //   learned strategies train on what comes before

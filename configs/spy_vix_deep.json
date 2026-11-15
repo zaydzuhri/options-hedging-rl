@@ -3,7 +3,7 @@
   "data": {"source": "yahoo", "ticker": "SPY", "start": "2005-01-01", "end": "2025-12-31", "interval": "1d"},
   "vol": {"type": "ticker", "ticker": "^VIX", "scale": 0.01},
   "option": {"type": "call", "moneyness": 1.0, "maturity_steps": 21},
-  "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},
+  "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252, "position_limits": [0, 1]},
   "split": {"test_start": "2019-01-01"},
   "episodes": {"stride": 5},
   "strategies": [

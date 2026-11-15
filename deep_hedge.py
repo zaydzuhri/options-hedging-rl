@@ -129,15 +129,16 @@ def act(policy, obs) -> float:
 # 3. Differentiable P&L
 # ---------------------------------------------------------------------------
 
-def episode_pnl(policy, ep, cost_rate, rate, dt) -> torch.Tensor:
+def episode_pnl(policy, ep, cost_rate, rate, dt, limits=None) -> torch.Tensor:
     """Final P&L of each episode in the batch. Same accounting as HedgingEnv.step, but on
     tensors, so gradients flow from the P&L back through every trade into the policy."""
     spots = ep["spots"]
     n = spots.shape[1] - 1
+    lo, hi = limits if limits is not None else (-math.inf, math.inf)
     position, cash = torch.zeros_like(ep["premium"]), ep["premium"]   # we sold the option
     growth = math.exp(rate * dt)
     for t in range(n):
-        target = policy(ep["features"][:, t], ep["delta"][:, t], position)
+        target = policy(ep["features"][:, t], ep["delta"][:, t], position).clamp(lo, hi)
         trade = target - position
         cash = (cash - trade * spots[:, t] - cost_rate * trade.abs() * spots[:, t]) * growth
         position = target
@@ -182,7 +183,7 @@ def _market(cfg):
     opt, mkt = cfg["option"], cfg["market"]
     return dict(kind=opt.get("type", "call"), moneyness=opt.get("moneyness", 1.0), rate=mkt.get("rate", 0.0),
                 cost_rate=mkt.get("cost_bps", 0.0) / 1e4, steps_per_year=mkt.get("steps_per_year", 252),
-                n_steps=opt["maturity_steps"])
+                n_steps=opt["maturity_steps"], limits=mkt.get("position_limits"))
 
 
 def train(fit, val, p, m, log=print):
@@ -191,7 +192,7 @@ def train(fit, val, p, m, log=print):
     flat = fit["features"].reshape(-1, len(FEATURES))
     policy = ARCHS[p["arch"]](flat.mean(0), flat.std(0), p["hidden"], p["layers"]).to(DTYPE)
     optim = torch.optim.Adam(policy.parameters(), lr=p["lr"])
-    pnl_of = lambda pol, ep: episode_pnl(pol, ep, m["cost_rate"], m["rate"], 1.0 / m["steps_per_year"])
+    pnl_of = lambda pol, ep: episode_pnl(pol, ep, m["cost_rate"], m["rate"], 1.0 / m["steps_per_year"], m["limits"])
     with torch.no_grad():
         ref = risk(pnl_of(lambda f, d, x: d, val), p["objective"]).item()
     log(f"  val risk of the daily delta hedge (reference): {ref:.4f}")
@@ -235,13 +236,14 @@ def check_parity(model_path, params, episodes, m, n=50):
     """The backtester and the differentiable P&L must agree, or we trained on the wrong problem."""
     from strategies.learned import DeepHedge
 
-    env = HedgingEnv(m["kind"], m["moneyness"], m["rate"], m["cost_rate"] * 1e4, m["steps_per_year"])
+    env = HedgingEnv(m["kind"], m["moneyness"], m["rate"], m["cost_rate"] * 1e4, m["steps_per_year"], m["limits"])
     strategy = DeepHedge(**params)
     episodes = episodes[:n]
     env_pnl = np.array([run_episode(env, strategy, ep)["pnl"] for ep in episodes])
     ep = episode_tensors(episodes, m["kind"], m["moneyness"], m["rate"], m["steps_per_year"])
     with torch.no_grad():
-        torch_pnl = episode_pnl(load_policy(model_path), ep, m["cost_rate"], m["rate"], 1.0 / m["steps_per_year"])
+        torch_pnl = episode_pnl(load_policy(model_path), ep, m["cost_rate"], m["rate"], 1.0 / m["steps_per_year"],
+                                m["limits"])
     gap = np.abs(env_pnl - torch_pnl.numpy()).max()
     assert gap < 1e-8, f"backtester and differentiable P&L disagree by {gap:.2e}"
     return gap
