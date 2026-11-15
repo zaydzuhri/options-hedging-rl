@@ -1,5 +1,7 @@
 """Classical, non-learned hedging strategies."""
 
+import numpy as np
+
 from strategy import Observation, Strategy
 
 
@@ -40,3 +42,18 @@ class DeltaBand(Strategy):
         if self.params.get("to_edge", False):
             return obs.delta - band if gap > 0 else obs.delta + band
         return obs.delta
+
+
+class WhalleyWilmott(Strategy):
+    """Whalley-Wilmott (1997) asymptotically optimal no-trade band for small proportional costs:
+        half-width = (3 c S exp(-r tau) Gamma^2 / (2 * risk_aversion))^(1/3)
+    and when outside the band, trade only back to its edge. Wide where gamma is large.
+
+    params:
+      risk_aversion (float, default 1.0): exponential-utility risk aversion (per $ of P&L)
+    """
+
+    def act(self, obs: Observation) -> float:
+        gam = self.params.get("risk_aversion", 1.0)
+        half = (3 * obs.cost_rate * obs.spot * np.exp(-obs.rate * obs.tau) * obs.gamma**2 / (2 * gam)) ** (1 / 3)
+        return float(np.clip(obs.position, obs.delta - half, obs.delta + half))

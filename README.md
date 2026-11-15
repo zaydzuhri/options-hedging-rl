@@ -11,10 +11,16 @@ Outputs go to `results/<name>/`: `summary.csv`, `episodes.csv` (one row per stra
 |---|---|
 | `backtest.py` | everything that isn't a strategy: data loading, episodes, `HedgingEnv`, metrics, plot, CLI |
 | `strategy.py` | the interface: `Observation` (what a strategy sees) and `Strategy` (`reset()`, `act(obs) -> shares`), plus the `black_scholes` formula |
-| `strategies/` | concrete strategies + the name → class registry in `__init__.py`: `baselines.py` (no hedge, delta, delta band), `mpc.py` (model predictive control, single shooting) |
+| `strategies/` | concrete strategies + the name → class registry in `__init__.py` (each file can be deleted on its own): |
+| ↳ `baselines.py` | `no_hedge`, `delta_hedge`, `delta_band`, `ww_band` (Whalley–Wilmott no-trade band) |
+| ↳ `dp.py` | `dp`: dynamic programming on a grid, the exactly optimal no-trade band for a price model (exponential utility) |
+| ↳ `mpc.py` | `mpc`: model predictive control by single shooting over sampled scenarios; plans `open` / `affine` / `band`, objectives `mean_var` / `cara` / `rsqp` |
+| ↳ `ilqg.py` | `ilqg`: iterative LQG trajectory optimization in delta-hedged coordinates; receding horizon or solve-once |
+| ↳ `models.py` | price models the model-based strategies plan with: `gbm` (current vol) or `gjr_garch` (filters the variance from observed prices) |
 | `configs/` | one JSON per experiment |
 
 New to options? Read [`GLOSSARY.md`](GLOSSARY.md) first: every term, with a worked example.
+The planning methods (DP, MPC, iLQG), how they work and what had to be fixed: [`METHODS.md`](METHODS.md).
 
 ## The problem in one paragraph
 We **sell** one option (a call: the buyer can buy one share at the *strike* K at expiry, so we owe `max(S_T − K, 0)`). We get paid a *premium* upfront. If the stock rallies we lose a lot, so we **hedge** by holding some shares of the stock: when the stock goes up, the shares gain value, which offsets what we'll owe. The Black-Scholes **delta** says how many shares to hold right now so that small price moves cancel out. Delta changes as price and time move, so we have to keep trading, and each trade costs money. That trade-off (stay close to delta vs. avoid paying costs) is the control problem.
@@ -43,7 +49,8 @@ We **sell** one option (a call: the buyer can buy one share at the *strike* K at
   "market": {"rate": 0.03, "cost_bps": 5, "steps_per_year": 252},    // cost_bps: 5 = 0.05% of each $ traded
   "episodes": {"stride": 5},               // start a new option every 5 steps (default: no overlap)
   "plot_episode": 500,                     // optional: which episode to draw in the plot
-  "eval": {"n_splits": 10},                // optional: cut episodes into 10 "test sets"; rsqp = their average, rsqp_sd = spread
+  "eval": {"n_splits": 10, "risk_aversion": 1.0},  // optional: cut episodes into 10 "test sets" (rsqp = their average,
+                                           //   rsqp_sd = spread); risk_aversion g adds ce = -log E[exp(-g P&L)] / g
   "strategies": [
     {"name": "delta_hedge", "label": "delta_weekly", "params": {"rebalance_every": 5}}
   ]

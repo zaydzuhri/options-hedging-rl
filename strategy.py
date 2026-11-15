@@ -22,10 +22,11 @@ from scipy.special import ndtr  # standard normal CDF N(x); works on whole array
 
 def black_scholes(spot, strike, tau, vol, rate, kind="call"):
     """Price, delta and gamma of a European option. `spot` can be a number or a numpy array
-    (e.g. many simulated scenarios at once). tau = years to maturity; at tau == 0 this
-    returns the payoff (and a 0/1 delta)."""
+    (e.g. many simulated scenarios at once), and so can `vol` (one per scenario). tau = years
+    to maturity; at tau == 0 this returns the payoff (and a 0/1 delta)."""
     spot = np.asarray(spot, dtype=float)
-    if tau <= 0 or vol <= 0:
+    vol = np.maximum(vol, 1e-12)
+    if tau <= 0 or np.all(vol <= 1e-12):
         if kind == "call":
             return np.maximum(spot - strike, 0.0), 1.0 * (spot > strike), 0.0 * spot
         return np.maximum(strike - spot, 0.0), -1.0 * (spot < strike), 0.0 * spot

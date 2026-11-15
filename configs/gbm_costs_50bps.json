@@ -1,0 +1,105 @@
+{
+  "name": "gbm_costs_50bps",
+  "data": {
+    "source": "gbm",
+    "n_steps": 42000,
+    "sigma": 0.2,
+    "mu": 0.0,
+    "seed": 2
+  },
+  "vol": {
+    "type": "constant",
+    "value": 0.2
+  },
+  "option": {
+    "type": "call",
+    "moneyness": 1.0,
+    "maturity_steps": 21
+  },
+  "market": {
+    "rate": 0.0,
+    "cost_bps": 50,
+    "steps_per_year": 252
+  },
+  "eval": {
+    "risk_aversion": 1.0,
+    "n_splits": 10
+  },
+  "strategies": [
+    {
+      "name": "delta_hedge",
+      "label": "delta_daily"
+    },
+    {
+      "name": "ww_band",
+      "label": "ww_band",
+      "params": {
+        "risk_aversion": 1.0
+      }
+    },
+    {
+      "name": "dp",
+      "label": "dp",
+      "params": {
+        "risk_aversion": 1.0
+      }
+    },
+    {
+      "name": "mpc",
+      "label": "mpc_open",
+      "params": {
+        "horizon": 21,
+        "plan": "open",
+        "objective": "cara",
+        "risk_aversion": 1.0
+      }
+    },
+    {
+      "name": "mpc",
+      "label": "mpc_affine",
+      "params": {
+        "horizon": 21,
+        "plan": "affine",
+        "objective": "cara",
+        "risk_aversion": 1.0
+      }
+    },
+    {
+      "name": "mpc",
+      "label": "mpc_band",
+      "params": {
+        "horizon": 21,
+        "plan": "band",
+        "objective": "cara",
+        "risk_aversion": 1.0,
+        "shared_band": true,
+        "n_scenarios": 1024
+      }
+    },
+    {
+      "name": "ilqg",
+      "label": "ilqg_H3",
+      "params": {
+        "horizon": 3,
+        "risk_aversion": 1.0
+      }
+    },
+    {
+      "name": "ilqg",
+      "label": "ilqg_once",
+      "params": {
+        "replan": false,
+        "risk_aversion": 1.0
+      }
+    },
+    {
+      "name": "ilqg",
+      "label": "ilqg_hybrid",
+      "params": {
+        "replan": false,
+        "trust_radius": 2.0,
+        "risk_aversion": 1.0
+      }
+    }
+  ]
+}

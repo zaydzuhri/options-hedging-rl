@@ -1,7 +1,7 @@
 """
 Backtest option-hedging strategies on real (Yahoo Finance) or simulated price paths.
 
-    uv run backtest.py --config configs/spy_vix.json
+    uv run backtest.py --config configs/spy_vix.json [--workers 10]
 
 File layout (top to bottom; Black-Scholes pricing lives in strategy.py):
   1. Market data                    -> a price series + a volatility series
@@ -297,9 +297,17 @@ def rsqp(pnl: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.maximum(-pnl, 0.0) ** 2)))
 
 
-def summarize(results: pd.DataFrame, n_splits: int = 1) -> pd.DataFrame:
+def certainty_equivalent(pnl: np.ndarray, risk_aversion: float) -> float:
+    """CE = -log E[exp(-g * P&L)] / g: the sure amount you'd value the risky P&L at under
+    exponential utility. ~ mean - (g/2) * variance for small risk; higher is better."""
+    z = -risk_aversion * np.asarray(pnl)
+    return float(-(z.max() + np.log(np.mean(np.exp(z - z.max())))) / risk_aversion)
+
+
+def summarize(results: pd.DataFrame, n_splits: int = 1, risk_aversion: float | None = None) -> pd.DataFrame:
     """One row of metrics per strategy. With n_splits > 1 the episodes are cut into that many
-    consecutive groups ("test sets"); rsqp is then the average over groups and rsqp_sd its spread."""
+    consecutive groups ("test sets"); rsqp is then the average over groups and rsqp_sd its spread.
+    With a risk_aversion g, also the certainty equivalent ce (see certainty_equivalent)."""
     def cvar(x, q=0.05):  # average of the worst 5% outcomes ("expected shortfall")
         x = np.sort(x.to_numpy())
         return x[: max(1, int(len(x) * q))].mean()
@@ -317,6 +325,8 @@ def summarize(results: pd.DataFrame, n_splits: int = 1) -> pd.DataFrame:
     })
     if n_splits > 1:
         out.insert(out.columns.get_loc("rsqp") + 1, "rsqp_sd", split_rsqp.apply(np.std))
+    if risk_aversion:
+        out.insert(out.columns.get_loc("mean_cost"), "ce", g["pnl"].apply(lambda x: certainty_equivalent(x, risk_aversion)))
     return out
 
 
@@ -375,9 +385,23 @@ def plot(results: pd.DataFrame, example: dict, labels: list[str], title: str, pa
     plt.close(fig)
 
 
+def _run_chunk(job):
+    """Worker for --workers: one strategy on episodes [lo, hi). Rebuilds the episodes from the config
+    (cached / seeded, so identical in every process)."""
+    cfg, s, lo, hi = job
+    opt, mkt = cfg["option"], cfg["market"]
+    env = HedgingEnv(opt.get("type", "call"), opt.get("moneyness", 1.0), mkt.get("rate", 0.0),
+                     mkt.get("cost_bps", 0.0), mkt.get("steps_per_year", 252))
+    strategy = STRATEGIES[s["name"]](**s.get("params", {}))
+    label = s.get("label", s["name"])
+    return [dict(strategy=label, **run_episode(env, strategy, ep)) for ep in load_episodes(cfg)[0][lo:hi]]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True, help="path to a JSON config, e.g. configs/spy_vix.json")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="processes to run (strategy x chunk of episodes) in parallel; 1 = sequential")
     args = parser.parse_args()
     cfg = json.loads(Path(args.config).read_text())
     name = cfg.get("name", Path(args.config).stem)
@@ -392,18 +416,29 @@ def main():
 
     rows, example, labels = [], {}, []
     ex_idx = cfg.get("plot_episode", len(episodes) // 2)
+    if args.workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        cuts = np.linspace(0, len(episodes), args.workers + 1).astype(int)
+        jobs = [(cfg, s, cuts[i], cuts[i + 1]) for s in cfg["strategies"] for i in range(args.workers) if cuts[i + 1] > cuts[i]]
+        with ProcessPoolExecutor(args.workers) as pool:
+            for chunk in pool.map(_run_chunk, jobs):     # map keeps job order = episode order per strategy
+                rows += chunk
     for s in cfg["strategies"]:
         label = s.get("label", s["name"])
         strategy = STRATEGIES[s["name"]](**s.get("params", {}))
         labels.append(label)
-        for i, ep in enumerate(episodes):
-            rows.append(dict(strategy=label, **run_episode(env, strategy, ep)))
+        todo = enumerate(episodes) if args.workers <= 1 else [(ex_idx, episodes[ex_idx])]
+        for i, ep in todo:
+            r = dict(strategy=label, **run_episode(env, strategy, ep))
+            if args.workers <= 1:
+                rows.append(r)
             if i == ex_idx:
                 hist = pd.DataFrame(env.history)
                 hist.attrs.update(start=ep.start, strike=env.strike)
                 example[label] = hist
     results = pd.DataFrame(rows)
-    summary = summarize(results, cfg.get("eval", {}).get("n_splits", 1))
+    ev = cfg.get("eval", {})
+    summary = summarize(results, ev.get("n_splits", 1), ev.get("risk_aversion"))
 
     print(f"mean premium received: {results.premium.mean():.3f}  (all P&L figures in $ per option on $100 of stock)\n")
     print(summary.round(3).to_string())
