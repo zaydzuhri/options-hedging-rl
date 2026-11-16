@@ -1,5 +1,5 @@
 {
-  "name": "gbm_deep_mpc",
+  "name": "gbm_bench",
   "data": {
     "source": "gbm",
     "n_steps": 500000,
@@ -31,55 +31,34 @@
   "episodes": {
     "stride": 21
   },
+  "eval": {
+    "risk_aversion": 1.0,
+    "baseline": "dp"
+  },
   "strategies": [
+    {
+      "name": "no_hedge"
+    },
     {
       "name": "delta_hedge",
       "label": "delta_daily"
     },
     {
-      "name": "whalley_wilmott",
+      "name": "ww_band",
       "label": "ww",
       "params": {
         "risk_aversion": 1.0
       }
     },
     {
-      "name": "dp_optimal",
-      "label": "dp_optimal",
-      "params": {
-        "model": "models/gbm_deep/dp.npz",
-        "risk_aversion": 1.0
-      }
-    },
-    {
-      "name": "deep_hedge",
-      "label": "deep_band",
-      "params": {
-        "model": "models/gbm_deep/deep_band.pt",
-        "arch": "band",
-        "objective": {
-          "type": "entropic",
-          "risk_aversion": 1.0
-        }
-      }
-    },
-    {
-      "name": "deep_hedge",
-      "label": "deep_mlp",
-      "params": {
-        "model": "models/gbm_deep/deep_mlp.pt",
-        "arch": "mlp",
-        "objective": {
-          "type": "entropic",
-          "risk_aversion": 1.0
-        }
-      }
-    },
-    {
       "name": "dp",
       "label": "dp",
       "params": {
-        "risk_aversion": 1.0
+        "risk_aversion": 1.0,
+        "h_range": [
+          0,
+          1
+        ]
       }
     },
     {
@@ -93,10 +72,30 @@
         "objective": "cara",
         "risk_aversion": 1.0
       }
+    },
+    {
+      "name": "deep_hedge",
+      "label": "deep_band",
+      "params": {
+        "model": "models/gbm_bench/deep_band.pt",
+        "arch": "band",
+        "objective": {
+          "type": "entropic",
+          "risk_aversion": 1.0
+        }
+      }
+    },
+    {
+      "name": "deep_hedge",
+      "label": "deep_mlp",
+      "params": {
+        "model": "models/gbm_bench/deep_mlp.pt",
+        "arch": "mlp",
+        "objective": {
+          "type": "entropic",
+          "risk_aversion": 1.0
+        }
+      }
     }
-  ],
-  "eval": {
-    "risk_aversion": 1.0,
-    "baseline": "dp_optimal"
-  }
+  ]
 }

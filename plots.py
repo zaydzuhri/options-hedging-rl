@@ -29,8 +29,8 @@ import pandas as pd
 # three categorical slots are validated colourblind-safe for every pair; light chart surface only.
 SURFACE, INK, INK2, MUTED, GRID, AXIS = "#fcfcfb", "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 SLOTS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
-FAMILY = {"mpc": 0, "dp": 1, "dp_optimal": 1, "deep_hedge": 2}
-BASELINES = {"no_hedge", "delta_hedge", "delta_band", "ww_band", "whalley_wilmott"}
+FAMILY = {"mpc": 0, "dp": 1, "deep_hedge": 2}
+BASELINES = {"no_hedge", "delta_hedge", "delta_band", "ww_band"}
 
 # key, title, unit, which way is better
 METRICS = [
@@ -47,8 +47,11 @@ METRICS = [
 # ---------------------------------------------------------------------------- data
 def load_run(folder):
     folder = Path(folder)
-    cfg = json.loads((folder / "config.json").read_text())
-    eps = pd.read_csv(folder / "episodes.csv")
+    return run_from(json.loads((folder / "config.json").read_text()), pd.read_csv(folder / "episodes.csv"), folder)
+
+
+def run_from(cfg, eps, folder=None):
+    """A run from a config and its per-episode results (one row per strategy x episode)."""
     labels = [s.get("label", s["name"]) for s in cfg["strategies"]]
     labels = [lab for lab in labels if lab in set(eps.strategy)]
     by = {lab: eps[eps.strategy == lab].reset_index(drop=True) for lab in labels}
@@ -78,7 +81,7 @@ def baseline(cfg, labels):
     want = cfg.get("eval", {}).get("baseline")
     if want in labels:
         return want
-    for name in ("ww_band", "whalley_wilmott", "delta_hedge"):
+    for name in ("ww_band", "delta_hedge"):
         for s in cfg["strategies"]:
             if s["name"] == name and s.get("label", s["name"]) in labels:
                 return s.get("label", s["name"])

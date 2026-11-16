@@ -3,13 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Learning the No-Trade Band</title>
+<title>Plan or Learn the Hedge</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
 <style>
 /* Layout: one reading column (~68ch) for prose; figures break out to the full 1080px frame.
-   Color: chart chrome and series steps from the validated reference palette; one hue per policy, everywhere. */
+   Color: chart chrome and series steps from the validated reference palette, in slot order (MPC, DP, learned,
+   Whalley-Wilmott, learned MLP; checked on adjacent pairs in both modes); one hue per method, everywhere.
+   Three hues are under 3:1 against the surface, so every series also has a text label (legends, tables). */
 :root {
   --plane: #f9f9f7;
   --surface: #fcfcfb;
@@ -21,10 +23,10 @@
   --ring: rgba(11, 11, 11, 0.10);
   --wash: rgba(42, 120, 214, 0.08);
   --accent: #2a78d6;
-  --s-learned: #2a78d6;
-  --s-ww: #eb6834;
-  --s-dp: #1baf7a;
-  --s-band: #eda100;
+  --s-mpc: #2a78d6;
+  --s-dp: #eb6834;
+  --s-learned: #1baf7a;
+  --s-ww: #eda100;
   --s-mlp: #e87ba4;
   --s-ref: #0b0b0b;
   --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
@@ -41,14 +43,14 @@
   :root:not([data-theme="light"]) {
     --plane: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #a3a29b;
     --grid: #2c2c2a; --axis: #4a4a46; --ring: rgba(255, 255, 255, 0.10); --wash: rgba(57, 135, 229, 0.12);
-    --accent: #3987e5; --s-learned: #3987e5; --s-ww: #d95926; --s-dp: #199e70; --s-band: #c98500;
+    --accent: #3987e5; --s-mpc: #3987e5; --s-dp: #d95926; --s-learned: #199e70; --s-ww: #c98500;
     --s-mlp: #d55181; --s-ref: #f0efec; color-scheme: dark;
   }
 }
 :root[data-theme="dark"] {
   --plane: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink-2: #c3c2b7; --muted: #a3a29b;
   --grid: #2c2c2a; --axis: #4a4a46; --ring: rgba(255, 255, 255, 0.10); --wash: rgba(57, 135, 229, 0.12);
-  --accent: #3987e5; --s-learned: #3987e5; --s-ww: #d95926; --s-dp: #199e70; --s-band: #c98500;
+  --accent: #3987e5; --s-mpc: #3987e5; --s-dp: #d95926; --s-learned: #199e70; --s-ww: #c98500;
   --s-mlp: #d55181; --s-ref: #f0efec; color-scheme: dark;
 }
 
@@ -143,7 +145,7 @@ select { font: 400 0.9375rem var(--f-body); color: var(--ink); background: var(-
 .c-learned { stroke: var(--s-learned); } .f-learned { fill: var(--s-learned); }
 .c-ww { stroke: var(--s-ww); } .f-ww { fill: var(--s-ww); }
 .c-dp { stroke: var(--s-dp); } .f-dp { fill: var(--s-dp); }
-.c-band { stroke: var(--s-band); } .f-band { fill: var(--s-band); }
+.c-mpc { stroke: var(--s-mpc); } .f-mpc { fill: var(--s-mpc); }
 .c-mlp { stroke: var(--s-mlp); } .f-mlp { fill: var(--s-mlp); }
 .c-ref { stroke: var(--s-ref); } .f-ref { fill: var(--s-ref); }
 .c-spot { stroke: var(--ink-2); }
@@ -165,6 +167,9 @@ table.data td { padding: 7px 0 7px 12px; text-align: right; font-variant-numeric
 table.data td:first-child { white-space: normal; }
 table.data tr.hl td { background: var(--wash); }
 .who { display: inline-flex; align-items: center; gap: 8px; }
+table.data td.sig { font-weight: 600; color: var(--ink); }
+.method h3 { display: flex; align-items: center; gap: 8px; }
+.method .need { font: 500 0.75rem/1.4 var(--f-mono); color: var(--ink-2); text-transform: uppercase; letter-spacing: 0.04em; }
 .sub { display: block; font-size: 0.75rem; color: var(--ink-2); }
 
 .checks { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 12px; }
@@ -182,9 +187,9 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
 
 <header class="hero">
   <p class="eyebrow">IFT 6162 · Reinforcement Learning and Optimal Control · Fall 2026</p>
-  <h1>Learning the no-trade band</h1>
-  <p class="lede">We sell an option and must hedge it by trading the stock every day. Each trade costs money, so the question is when to trade and how much. We solve this control problem three ways: a published formula, exact dynamic programming, and a neural policy trained by differentiating through the P&amp;L.</p>
-  <p class="claim" id="claim">With 10 bps trading costs, the learned no-trade band is within <span class="num" data-bind="gapPct">0.5%</span> of the exact optimum on unseen paths. The published Whalley–Wilmott band is no better than plain daily delta hedging at that cost.</p>
+  <h1>Plan or learn the no-trade band?</h1>
+  <p class="lede">We sell an option and hedge it by trading the stock every day. Each trade costs money, so the question is when to trade and how much. We find the trading policy two ways and check both against the exact answer: <strong>plan</strong> it online with model predictive control, which needs a model of the market but no training, or <strong>learn</strong> it offline with deep hedging, which needs data but no model.</p>
+  <p class="claim" id="claim">With 10 bps trading costs, MPC closes <span class="num" data-bind="mpcClosed">93%</span> of the gap between daily delta hedging and the exact optimum on unseen paths, without any training; the learned band closes <span class="num" data-bind="learnedClosed">96%</span>, and the published Whalley–Wilmott band none of it. On four real stocks in 2019–2025, the planners gave the steadiest gains over daily delta, while the learned policies ranged from the best to the worst, depending on the trend they had learned.</p>
   <p class="byline">Team: <em>add the three team members</em> · Code: <a href="https://github.com/zaydzuhri/options-hedging-rl">github.com/zaydzuhri/options-hedging-rl</a></p>
 </header>
 
@@ -203,11 +208,24 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
   </div>
   <div class="scroll">
     <table class="spec">
-      <tr><th>Objective</th><td>Minimize a risk measure of final P&amp;L = premium + share gains − payoff − costs: entropic risk (1/a)·log E[e<sup>−a·P&amp;L</sup>] in the Black–Scholes world, CVaR 5% on real data.</td></tr>
-      <tr><th>Information</th><td>The policy sees only what is known on day t: no look-ahead. Learned policies are trained on data before the test period.</td></tr>
+      <tr><th>Objective</th><td>Every method minimizes the same thing: the entropic risk (1/a)·log E[e<sup>−a·P&amp;L</sup>] of the final P&amp;L = premium + share gains − payoff − costs. It equals minus the <em>certainty equivalent</em>, the sure amount a risk-averse seller would trade the random P&amp;L for. a = 1 in the Black–Scholes world, a = 0.3 on real data.</td></tr>
+      <tr><th>Information</th><td>The policy sees only what is known on day t: no look-ahead. Everything is fit, trained or tuned on data before the test period.</td></tr>
       <tr><th>Assumption</th><td>We are a price taker: our trades do not move the market, so history can be replayed as the disturbance. This also makes the P&amp;L differentiable in our actions.</td></tr>
-      <tr><th>Baselines</th><td>Daily delta hedging, a fixed no-trade band, and the Whalley–Wilmott (1997) band, the published asymptotically optimal rule under proportional costs.</td></tr>
     </table>
+  </div>
+</section>
+
+<section aria-labelledby="h-methods">
+  <div class="prose">
+    <p class="eyebrow">Methods</p>
+    <h2 id="h-methods">Four ways to choose the trade</h2>
+    <p>All four answer the same question, how many shares to hold until tomorrow, for the same objective. They differ in what they need: a formula, a model, or data. Daily delta hedging, which ignores costs, is the baseline.</p>
+  </div>
+  <div class="checks">
+    <div class="check method"><h3><span class="key" data-key="ww"></span>Whalley–Wilmott band</h3><p class="need">Needs: a formula</p><p>The published answer for small costs and continuous trading (1997): hold anything within (3/2 · e<sup>−rτ</sup> · λ · S · Γ² / a)<sup>1/3</sup> of delta. The band is wide where gamma is large, because there delta jumps around and chasing it is expensive.</p></div>
+    <div class="check method"><h3><span class="key" data-key="dp"></span>Dynamic programming</h3><p class="need">Needs: the model, a small state</p><p>Backward induction over (day, spot, shares held), from expiry to today. With entropic risk the cash drops out of the value function, so the state stays three-dimensional and the answer is exact: the true optimum when the model is right, our ground truth.</p></div>
+    <div class="check method"><h3><span class="key" data-key="mpc"></span>Model predictive control</h3><p class="need">Needs: a model to simulate · no training</p><p>Every day: simulate 1,024 futures from the model, choose today's trade and a no-trade band for the remaining days (three numbers) by gradient descent through the simulated P&amp;L, make today's trade, and plan again tomorrow from what actually happened. About 10 ms per decision.</p></div>
+    <div class="check method"><h3><span class="key" data-key="learned"></span>Deep hedging</h3><p class="need">Needs: data or a simulator · training</p><p>A small network outputs the edges of a no-trade band from moneyness, time and volatility. It is trained offline by backpropagating the risk of the P&amp;L through whole episodes; each decision is then one forward pass.</p></div>
   </div>
 </section>
 
@@ -215,7 +233,7 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
   <div class="prose">
     <p class="eyebrow">Black–Scholes world · interactive</p>
     <h2 id="h-band">Where to stop trading</h2>
-    <p>In a simulated Black–Scholes market (σ = 20%, no drift) we can solve the problem <strong>exactly</strong> by dynamic programming on a (day, spot, shares held) grid. That gives a ground truth to compare the learned policy and the published formula against. Change the trading cost and the days left, and compare the three bands.</p>
+    <p>In a simulated Black–Scholes market (σ = 20%, no drift) the model is known, so dynamic programming gives the exact optimum to compare against. Change the trading cost and the days left, and compare where each method stops trading. MPC has no band to read off, so we ask it: its trade from 0 shares is the lower edge, its trade from 1 share the upper edge.</p>
   </div>
   <figure>
     <div class="controls">
@@ -233,7 +251,7 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
         <p class="byline" id="risk-note"></p>
       </div>
     </div>
-    <figcaption><strong>The learned band is close to the optimal one; Whalley–Wilmott's is far too wide.</strong> The y-axis is how far the shares held may drift from delta before the policy trades. Where the learned and optimal bands differ, the risk barely changes: the table shows the learned policy within a fraction of a percent of the optimum at every cost. Whalley–Wilmott's formula assumes you can trade continuously. With one trade a day, delta moves by about the width of its band between trades, so waiting that long is too risky. At 2–5 bps it is worse than daily delta hedging, and only at 20 bps does it beat it. With zero cost every band collapses to delta.</figcaption>
+    <figcaption><strong>MPC and the learned band follow the optimal band; Whalley–Wilmott's is far too wide.</strong> The y-axis is how far the shares held may drift from delta before the policy trades. MPC's edges are jagged because each point is a fresh plan over 1,024 random futures. Where MPC or the learned band differ from the optimal band, the risk barely changes: the table shows both within a fraction of a percent of the optimum at every cost (MPC slightly closer at 0–2 bps, the learned band at 5 bps and above). Whalley–Wilmott's formula assumes you can trade continuously. With one trade a day, delta moves by about the width of its band between trades, so waiting that long is too risky: at 2–5 bps it is worse than daily delta hedging, and only at 20 bps does it beat it. With zero cost every band collapses to delta.</figcaption>
   </figure>
 </section>
 
@@ -252,29 +270,36 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
     <div class="plot" id="loop-spot"></div>
     <div class="plot" id="loop-pos"></div>
     <div class="scroll"><table class="data" id="loop-table"></table></div>
-    <figcaption><strong>The optimal and learned policies trade on about 15 of 21 days and stay close to delta.</strong> Whalley–Wilmott trades least and lets its position drift furthest from delta. One path is an anecdote; the table in the previous figure averages over every test path.</figcaption>
+    <figcaption><strong>DP, MPC and the learned band trade on about 15 of 21 days and stay close to delta.</strong> Whalley–Wilmott trades least and lets its position drift furthest from delta. One path is an anecdote; the table in the previous figure averages over every test path.</figcaption>
   </figure>
 </section>
 
-<section aria-labelledby="h-spy">
+<section aria-labelledby="h-real">
   <div class="prose">
     <p class="eyebrow">Real data · interactive</p>
-    <h2 id="h-spy">SPY, 2019–2025, never seen in training</h2>
-    <p>Here the market is real: daily SPY prices, with each option priced at VIX (Yahoo has no historical option prices, so the options are synthetic). Policies trained on 2005–2018 to minimize CVaR 5% are tested on <span class="num" data-bind="spyN">348</span> one-month options starting in 2019–2025. The list starts with the five episodes where daily delta hedging lost the most.</p>
+    <h2 id="h-real">Four real stocks, 2019–2025, never seen in training</h2>
+    <p>Real daily prices of SPY, Coca-Cola, Johnson &amp; Johnson and Apple. The options are synthetic (Yahoo has no historical option prices): SPY options are priced at VIX, the stocks at their trailing 21-day realized volatility. The test set is a one-month call started every five trading days from 2019 to 2025, about <span class="num" data-bind="realN">350</span> per stock. Nothing is fit, trained or tuned on it.</p>
+    <p>The planners (DP and MPC) plan with a plain Black–Scholes model at the pricing volatility, with the interest rate as the drift: they do not know the real dynamics. The learned policies train on each stock's history before 2019 (from 2005 for SPY, 1990 for the others), or on a GJR-GARCH model fitted to it. Everyone minimizes entropic risk with a = 0.3 (with a = 1, a single bad month would decide the score).</p>
   </div>
   <figure>
-    <div class="controls">
-      <div class="control"><label class="label" for="spy-ep">Option sold on</label><select id="spy-ep"></select></div>
-    </div>
-    <ul class="legend" id="spy-legend"></ul>
-    <div class="plot" id="spy-spot"></div>
-    <div class="plot" id="spy-pos"></div>
-    <div class="scroll"><table class="data" id="spy-ep-table"></table></div>
-    <figcaption><strong>The learned policies hold about 0.1 share less than delta when the option is at or in the money.</strong> On the option sold 2020-02-27, daily delta lost 5.18 per $100 of stock and the learned MLP lost 2.07. In typical months the same tilt gives up some P&amp;L, because the market tends to rise: about 0.06 per option on average over the test period.</figcaption>
+    <div class="scroll"><table class="data" id="real-overview"></table></div>
+    <figcaption><strong>The planners give the steadiest gains; the learned policies swing from best to worst.</strong> Each cell is the certainty-equivalent gain over daily delta hedging ($ per $100 of stock, a = 0.3; higher is better) with its 95% paired block-bootstrap interval; bold: the interval excludes zero. DP and MPC improve on daily delta on SPY, KO and JNJ (significantly on KO and JNJ) and tie it on AAPL, although they plan with a plain Black–Scholes model. The learned policies learned how many shares to hold from their training years: on AAPL, which kept rising (19% a year before 2019, 33% after), they held more stock than delta and earned the trend; on SPY they held about 0.1 share less, which helped in the 2020 crash and cost in the rally.</figcaption>
   </figure>
   <figure>
-    <div class="scroll"><table class="data" id="spy-table"></table></div>
-    <figcaption><strong>Every learned policy improves the tail, but the evidence is thin.</strong> The worst 5% of test episodes come from two events (early 2020 and March 2025), so the 95% block-bootstrap intervals are wide and some reach zero. The MLP's result held across four random seeds. Policies trained only on simulated GJR-GARCH paths learn the same tilt toward fewer shares, so the result is not a memorized 2008.</figcaption>
+    <div class="controls">
+      <div class="control"><span class="label" id="lbl-asset">Stock</span><div class="seg" id="asset" role="group" aria-labelledby="lbl-asset"></div></div>
+      <div class="control"><label class="label" for="real-ep">Option sold on</label><select id="real-ep"></select></div>
+    </div>
+    <ul class="legend" id="real-legend"></ul>
+    <div class="plot" id="real-spot"></div>
+    <div class="plot" id="real-pos"></div>
+    <div class="scroll"><table class="data" id="real-ep-table"></table></div>
+    <figcaption><strong>One option at a time.</strong> The list starts with the five test options where daily delta hedging lost the most, then two typical months. DP and MPC hold a band around delta and trade about half as often; the learned band carries the tilt it learned from its training years (above delta on AAPL, below it on SPY).</figcaption>
+  </figure>
+  <figure>
+    <h3 style="font-size:1rem">All test options, <span id="real-name">SPY</span></h3>
+    <div class="scroll"><table class="data" id="real-table"></table></div>
+    <figcaption>Risk is the entropic risk with a = 0.3 (minus the certainty equivalent; lower is better). The gain over daily delta, CVaR (the average of the worst 5% of options), std and mean P&amp;L are in $ per $100 of stock; trades and costs are per option. Bold gain: its 95% block-bootstrap interval excludes zero.</figcaption>
   </figure>
 </section>
 
@@ -282,7 +307,7 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
   <div class="prose">
     <p class="eyebrow">Why not plain RL?</p>
     <h2 id="h-grad">Differentiate through the P&amp;L instead of guessing</h2>
-    <p>Policy-gradient methods such as REINFORCE and PPO estimate the gradient from which random actions happened to come with good outcomes (the <em>score function</em>). Because our trades do not move prices, the P&amp;L is a differentiable function of the positions, so we can backpropagate through the whole episode instead (the <em>pathwise</em> gradient). Both are unbiased estimates of the same gradient, computed here on the same episodes and noise.</p>
+    <p>Both MPC and deep hedging improve a policy by differentiating the simulated P&amp;L: our trades do not move prices, so the P&amp;L is a differentiable function of the positions (the <em>pathwise</em> gradient). Policy-gradient methods such as REINFORCE and PPO instead estimate the gradient from which random actions happened to come with good outcomes (the <em>score function</em>). Both are unbiased estimates of the same gradient, computed here on the same episodes and noise.</p>
   </div>
   <figure>
     <div class="controls">
@@ -301,7 +326,7 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
   <div class="prose">
     <p class="eyebrow">Verification</p>
     <h2 id="h-checks">How we checked the numbers</h2>
-    <p>Every figure on this page comes from the repository's backtester, the same code the tests exercise (<code>uv run pytest</code>, 29 tests, about 10 seconds, no network).</p>
+    <p>Every figure on this page comes from the repository's backtester, the same code the tests exercise (<code>uv run pytest</code>, about 30 seconds, no network).</p>
   </div>
   <div class="checks" id="checks"></div>
 </section>
@@ -311,11 +336,12 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
     <p class="eyebrow">Limitations</p>
     <h2 id="h-limits">What this does not show</h2>
     <ul>
-      <li><strong>Synthetic options.</strong> Real data gives real price paths, but option prices come from Black–Scholes at VIX. Real quotes would add a smile, a bid-ask spread on the option, and different vegas.</li>
+      <li><strong>Synthetic options.</strong> Real data gives real price paths, but option prices come from Black–Scholes at VIX or realized volatility. Real quotes would add a smile, a bid-ask spread on the option, and different vegas.</li>
+      <li><strong>A simple model for the planners.</strong> On real data DP and MPC plan with Black–Scholes at the pricing volatility. MPC can plan with any simulator (it already does GJR-GARCH); a better market model is the obvious next step.</li>
+      <li><strong>Compute per decision.</strong> MPC solves an optimization every day (about 10 ms for 1,024 scenarios); a trained network answers in microseconds. Training is the learned policy's up-front cost.</li>
       <li><strong>Price taker.</strong> Our trades never move prices. That is reasonable for one option on SPY, not for a large book.</li>
-      <li><strong>Thin tails in the test period.</strong> The SPY result rests on two crashes. It is consistent across seeds and training sources, but the confidence intervals are wide.</li>
-      <li><strong>The ground truth needs the model.</strong> Exact DP is only available in the Black–Scholes world with entropic risk; on real data we have baselines but no optimum.</li>
-      <li><strong>One hedging instrument.</strong> We hedge with the stock only. Hedging volatility risk would need a second option and a vector action.</li>
+      <li><strong>Thin tails in the test period.</strong> The worst test months come from a few events (early 2020, March 2025), so the real-data intervals are wide.</li>
+      <li><strong>The ground truth needs the model.</strong> The exact optimum is only available in the Black–Scholes world; on real data we can compare methods, not measure their distance to the best.</li>
     </ul>
   </div>
 </section>
@@ -326,22 +352,20 @@ footer { max-width: 1080px; margin: 0 auto; padding-block: 0 48px; font-size: va
     <h2 id="h-repro">Everything above, from a clean checkout</h2>
   </div>
   <pre>uv sync
-uv run pytest                                                   # 29 tests, ~10 s
-uv run dp_optimal.py          --config configs/gbm_deep.json   # exact DP, ~3 s
-uv run deep_hedge.py          --config configs/gbm_deep.json   # learned policies, ~20 s each
-uv run backtest.py            --config configs/gbm_deep.json   # out-of-sample comparison
-uv run deep_hedge.py          --config configs/spy_vix_deep.json
-uv run backtest.py            --config configs/spy_vix_deep.json
-uv run gradient_estimators.py --config configs/gbm_deep.json
-uv run make_site.py                                             # this page's data, ~6 min</pre>
+uv run pytest                                             # ~30 s
+uv run train.py    --config configs/gbm_bench.json        # learned policies, ~1 min each
+uv run backtest.py --config configs/gbm_bench.json --workers 10   # everyone out of sample (MPC: ~25 min)
+uv run train.py    --config configs/spy_bench.json        # same for spy, ko, jnj, aapl
+uv run backtest.py --config configs/spy_bench.json --workers 10
+uv run train.py    --config configs/gbm_bench.json --gradients
+uv run make_site.py                                       # this page's data (cached; ~2.5 h the first time)</pre>
   <div class="prose">
-    <p class="byline">References: H. Buehler, L. Gonon, J. Teichmann, B. Wood, “Deep hedging,” <em>Quantitative Finance</em> 19 (2019). A. E. Whalley, P. Wilmott, “An asymptotic analysis of an optimal hedging model for option pricing with transaction costs,” <em>Mathematical Finance</em> 7 (1997). S. Imaki, K. Imajo, K. Ito, K. Minami, K. Nakagawa, “No-transaction band network,” arXiv:2103.01775 (2021). M. Kamal, E. Derman, “When you cannot hedge continuously,” Goldman Sachs Quantitative Strategies (1999). L. Glosten, R. Jagannathan, D. Runkle, <em>Journal of Finance</em> 48 (1993). P.-L. Bacon, <a href="https://pierrelucbacon.com/rlbook/"><em>Building Up RL</em></a>.</p>
+    <p class="byline">References: A. E. Whalley, P. Wilmott, “An asymptotic analysis of an optimal hedging model for option pricing with transaction costs,” <em>Mathematical Finance</em> 7 (1997). S. D. Hodges, A. Neuberger, “Optimal replication of contingent claims under transaction costs,” <em>Review of Futures Markets</em> 8 (1989). A. Bemporad, L. Bellucci, T. Gabbriellini, “Dynamic option hedging via stochastic model predictive control based on scenario simulation,” <em>Quantitative Finance</em> 14 (2014), extended to transaction costs in <em>International Journal of Robust and Nonlinear Control</em> (2017). J. A. Primbs, “Dynamic hedging of basket options under proportional transaction costs using receding horizon control,” <em>International Journal of Control</em> 82 (2009). H. Buehler, L. Gonon, J. Teichmann, B. Wood, “Deep hedging,” <em>Quantitative Finance</em> 19 (2019). S. Imaki, K. Imajo, K. Ito, K. Minami, K. Nakagawa, “No-transaction band network,” arXiv:2103.01775 (2021). M. Kamal, E. Derman, “When you cannot hedge continuously,” Goldman Sachs Quantitative Strategies (1999). L. Glosten, R. Jagannathan, D. Runkle, <em>Journal of Finance</em> 48 (1993). P.-L. Bacon, <a href="https://pierrelucbacon.com/rlbook/"><em>Building Up RL</em></a>.</p>
   </div>
 </section>
 
 </main>
 <footer>Figures are drawn from precomputed runs in <code>data.js</code>, written by <code>make_site.py</code>.</footer>
-
 <script src="data.js"></script>
 <script>
 (() => {
@@ -373,14 +397,14 @@ uv run make_site.py                                             # this page's da
   const bsDelta = (lm, tau, vol) => ncdf((lm + 0.5 * vol * vol * tau) / (vol * Math.sqrt(tau)));
 
   const WHO = {
-    learned: { name: "Learned band", cls: "learned" }, dp: { name: "DP optimal", cls: "dp" },
+    mpc: { name: "MPC band", cls: "mpc" }, dp: { name: "DP optimal", cls: "dp" }, learned: { name: "Learned band", cls: "learned" },
     ww: { name: "Whalley–Wilmott", cls: "ww" }, delta: { name: "Daily delta", cls: "ref", dash: true },
-    delta_daily: { name: "Daily delta", cls: "ref", dash: true }, "delta_band_0.1": { name: "Fixed band 0.1", cls: "band" },
-    ww_g1: { name: "Whalley–Wilmott", cls: "ww" }, deep_band_cvar: { name: "Learned band", cls: "learned" },
-    deep_mlp_cvar: { name: "Learned MLP", cls: "mlp" }, deep_band_cvar_garch: { name: "Learned band, GARCH-trained", cls: "learned" },
-    deep_mlp_cvar_garch: { name: "Learned MLP, GARCH-trained", cls: "mlp" },
-    pathwise: { name: "Pathwise (deep hedging)", cls: "learned" }, score: { name: "Score function (REINFORCE)", cls: "ww" },
+    dp_real: { name: "DP (Black–Scholes model)", cls: "dp" }, mlp: { name: "Learned MLP", cls: "mlp" },
+    learned_garch: { name: "Learned band, GARCH-trained", cls: "learned" },
+    pathwise: { name: "Pathwise (deep hedging)", cls: "learned" }, score: { name: "Score function (REINFORCE)", cls: "mlp" },
   };
+  // real-data labels -> the method they belong to
+  const RW = { delta_daily: "delta", ww: "ww", dp: "dp_real", mpc_band: "mpc", deep_band: "learned", deep_mlp: "mlp", deep_band_garch: "learned_garch" };
   const keySvg = (cls, opts = {}) => {
     const s = el("svg", { width: 22, height: 10, viewBox: "0 0 22 10", "aria-hidden": "true" });
     if (opts.area) el("rect", { x: 0, y: 1, width: 22, height: 8, rx: 2, class: "area-dp" }, s);
@@ -446,9 +470,11 @@ uv run make_site.py                                             # this page's da
     return (v) => buttons.forEach((b, i) => b.setAttribute("aria-pressed", String(options[i].value === v)));
   }
 
+  document.querySelectorAll("[data-key]").forEach((n) => n.appendChild(keySvg(WHO[n.dataset.key].cls, WHO[n.dataset.key])));
+
   /* ---------- state ---------- */
-  const G = D.gbm, S = D.spy;
-  const state = { cost: "10", left: 10, path: 2, spy: 0, noise: 0.01 };
+  const G = D.gbm, R = D.real;
+  const state = { cost: "10", left: 10, path: 2, asset: 0, ep: 0, noise: 0.01 };
   const costOpts = G.costs.map((c) => ({ value: String(c), label: c + " bps" }));
   let setCost1, setCost2;
   const pickCost = (c) => { state.cost = c; setCost1(c); setCost2(c); renderBands(); renderLoop(); };
@@ -456,11 +482,11 @@ uv run make_site.py                                             # this page's da
   setCost2 = segmented($("#cost2"), costOpts, state.cost, pickCost);
 
   /* ---------- headline numbers ---------- */
-  const r10 = G.risk["10"], gap = D.gbm.checks.gap_to_dp;
-  const binds = {
-    gapPct: ((r10.learned.entropic - r10.dp.entropic) / r10.dp.entropic * 100).toFixed(1) + "%",
-    spyN: String(S.n_test),
-  };
+  const r10 = G.risk["10"];
+  const pct = (k) => ((r10[k].entropic - r10.dp.entropic) / r10.dp.entropic * 100).toFixed(1) + "%";
+  const closed = (k) => Math.round((1 - (r10[k].entropic - r10.dp.entropic) / (r10.delta.entropic - r10.dp.entropic)) * 100) + "%";
+  const binds = { gapPct: pct("learned"), mpcPct: pct("mpc"), learnedClosed: closed("learned"), mpcClosed: closed("mpc"),
+    realN: String(Math.round(R.reduce((a, r) => a + r.n_test, 0) / R.length)) };
   const e01 = D.gradients.errors.filter((r) => r.noise === 0.01 && r.batch === 1024);
   if (e01.length === 2) {
     const ratio = e01.find((r) => r.estimator === "score").rel_error / e01.find((r) => r.estimator === "pathwise").rel_error;
@@ -476,11 +502,12 @@ uv run make_site.py                                             # this page's da
     for (let k = 0; k < 21; k++) for (let i = 0; i < lm.length; i++) {
       const d = bsDelta(lm[i], (k + 1) / 252, 0.2);
       yMax = Math.max(yMax, Math.abs(B.dp_lo[k][i]), Math.abs(B.dp_hi[k][i]), Math.abs(B.nn_lo[k][i]), Math.abs(B.nn_hi[k][i]),
+        Math.abs(B.mpc_lo[k][i]), Math.abs(B.mpc_hi[k][i]),
         Math.min(1, d + B.ww[k][i]) - d, d - Math.max(0, d - B.ww[k][i]));
     }
   }
   yMax = Math.ceil(yMax * 20) / 20;
-  legend($("#band-legend"), [{ cls: "dp", name: "DP optimal band", area: true }, { cls: "learned", name: "Learned band" }, { cls: "ww", name: "Whalley–Wilmott (a = 1)", dash: true }]);
+  legend($("#band-legend"), [{ cls: "dp", name: "DP optimal band", area: true }, { cls: "mpc", name: "MPC band" }, { cls: "learned", name: "Learned band" }, { cls: "ww", name: "Whalley–Wilmott (a = 1)" }]);
   const leftInput = $("#left");
   leftInput.addEventListener("input", () => { state.left = +leftInput.value; $("#left-out").textContent = state.left + (state.left === 1 ? " day" : " days"); renderBands(); });
 
@@ -496,8 +523,9 @@ uv run make_site.py                                             # this page's da
     el("line", { x1: f.x0, x2: f.x1, y1: f.sy(0), y2: f.sy(0), class: "zero" }, f.svg);
     const area = B.dp_hi[k].map((v, i) => [lm[i], v]).concat(B.dp_lo[k].map((v, i) => [lm[i], v]).reverse());
     el("path", { d: area.map((p, i) => (i ? "L" : "M") + f.sx(p[0]).toFixed(1) + "," + f.sy(p[1]).toFixed(1)).join("") + "Z", class: "area-dp" }, f.svg);
+    for (const ys of [wwLo, wwHi]) el("path", { d: pathD(lm, ys, f.sx, f.sy), class: "line c-ww" }, f.svg);
     for (const ys of [B.nn_lo[k], B.nn_hi[k]]) el("path", { d: pathD(lm, ys, f.sx, f.sy), class: "line c-learned" }, f.svg);
-    for (const ys of [wwLo, wwHi]) el("path", { d: pathD(lm, ys, f.sx, f.sy), class: "line c-ww dash" }, f.svg);
+    for (const ys of [B.mpc_lo[k], B.mpc_hi[k]]) el("path", { d: pathD(lm, ys, f.sx, f.sy), class: "line c-mpc" }, f.svg);
     el("text", { x: f.x1 - 4, y: f.sy(0) - 6, "text-anchor": "end", class: "note" }, f.svg).textContent = "hold exactly delta";
     hover(host, f, (px) => {
       const v = f.sx.inv(px); let i = 0; let best = Infinity;
@@ -505,29 +533,31 @@ uv run make_site.py                                             # this page's da
       return { i, x: f.sx(lm[i]), title: `spot ${sgn((Math.exp(lm[i]) - 1) * 100, 1)}% vs strike · delta ${delta[i].toFixed(2)}` };
     }, (p) => [
       { cls: "dp", area: true, name: "DP optimal", value: `${sgn(B.dp_lo[k][p.i], 2)} to ${sgn(B.dp_hi[k][p.i], 2)}` },
+      { cls: "mpc", name: "MPC", value: `${sgn(B.mpc_lo[k][p.i], 2)} to ${sgn(B.mpc_hi[k][p.i], 2)}` },
       { cls: "learned", name: "Learned", value: `${sgn(B.nn_lo[k][p.i], 2)} to ${sgn(B.nn_hi[k][p.i], 2)}` },
-      { cls: "ww", dash: true, name: "Whalley–Wilmott", value: `${sgn(wwLo[p.i], 2)} to ${sgn(wwHi[p.i], 2)}` },
+      { cls: "ww", name: "Whalley–Wilmott", value: `${sgn(wwLo[p.i], 2)} to ${sgn(wwHi[p.i], 2)}` },
     ]);
     // table
-    const R = G.risk[state.cost], t = $("#risk-table"); t.replaceChildren();
+    const RK = G.risk[state.cost], t = $("#risk-table"); t.replaceChildren();
     $("#cost-name").textContent = state.cost + " bps";
     const head = h("tr", {}, h("thead", {}, t));
-    ["Policy", "Risk", "vs DP", "Trades", "Cost"].forEach((x) => h("th", {}, head, x));
+    ["Policy", "Risk", "vs DP (95% CI)", "Trades", "Cost"].forEach((x) => h("th", {}, head, x));
     const body = h("tbody", {}, t);
-    for (const key of ["dp", "learned", "delta", "ww"]) {
-      const tr = h("tr", key === "learned" ? { class: "hl" } : {}, body);
+    for (const key of ["dp", "mpc", "learned", "delta", "ww"]) {
+      const r = RK[key], tr = h("tr", key === "mpc" ? { class: "hl" } : {}, body);
       who(h("td", {}, tr), key);
-      h("td", {}, tr, R[key].entropic.toFixed(4));
-      h("td", {}, tr, key === "dp" ? "—" : sgn(R[key].entropic - R.dp.entropic, 4));
-      h("td", {}, tr, R[key].trades.toFixed(1));
-      h("td", {}, tr, R[key].cost.toFixed(3));
+      h("td", {}, tr, r.entropic.toFixed(4));
+      const td = h("td", {}, tr, key === "dp" ? "—" : sgn(-r.gain, 4));
+      if (key !== "dp") h("span", { class: "sub" }, td, `${sgn(-r.gain_hi, 4)} to ${sgn(-r.gain_lo, 4)}`);
+      h("td", {}, tr, r.trades.toFixed(1));
+      h("td", {}, tr, r.cost.toFixed(3));
     }
     $("#risk-note").textContent = `Entropic risk (a = 1, lower is better) on ${G.n_test.toLocaleString("en")} unseen paths. The DP's exact value is ${G.dp_value[state.cost].toFixed(4)}; the simulated value differs by sampling noise. Trades and cost ($ per $100 of stock) are per option.`;
   }
 
   /* ---------- closed loop ---------- */
   segmented($("#path"), G.examples.map((e, i) => ({ value: i, label: e.name.replace(/ \(.*\)/, "") })), state.path, (v) => { state.path = v; renderLoop(); });
-  const loopKeys = ["delta", "ww", "dp", "learned"];
+  const loopKeys = ["delta", "ww", "dp", "mpc", "learned"];
   legend($("#loop-legend"), loopKeys.map((k) => WHO[k]));
 
   function spotChart(host, spot, title, extraRows) {
@@ -576,41 +606,68 @@ uv run make_site.py                                             # this page's da
     const ex = G.examples[state.path], tr = G.traces[state.cost][state.path];
     spotChart($("#loop-spot"), ex.spot, "Simulated spot path", (t) => t < ex.delta.length ? [{ cls: "ref", dash: true, name: "delta", value: ex.delta[t].toFixed(3) }] : []);
     positionChart($("#loop-pos"), ex.delta, tr, loopKeys, "Shares held by each policy");
-    resultTable($("#loop-table"), tr, loopKeys, "learned");
+    resultTable($("#loop-table"), tr, loopKeys, "mpc");
   }
 
-  /* ---------- SPY ---------- */
-  const spyKeys = ["delta_daily", "delta_band_0.1", "ww_g1", "deep_band_cvar", "deep_mlp_cvar"];
-  legend($("#spy-legend"), spyKeys.map((k) => WHO[k]));
-  const sel = $("#spy-ep");
-  let worstRank = 0;
-  S.replays.forEach((r, i) => {
-    const label = r.kind === "worst" ? `${r.start} · worst #${++worstRank} for daily delta` : `${r.start} · typical month`;
-    h("option", { value: String(i) }, sel, label);
-  });
-  sel.addEventListener("change", () => { state.spy = +sel.value; renderSpy(); });
-  function renderSpy() {
-    const r = S.replays[state.spy];
-    spotChart($("#spy-spot"), r.spot, "SPY, rescaled to 100 at the start", (t) => [{ cls: "spot", name: "VIX", value: r.vix[t].toFixed(1) }]);
-    positionChart($("#spy-pos"), r.delta, Object.assign({ delta_daily: { position: r.delta } }, r.traces), spyKeys, "Shares held by each policy");
-    resultTable($("#spy-ep-table"), r.traces, spyKeys, "deep_mlp_cvar");
-  }
-  (() => {
-    const t = $("#spy-table");
-    const head = h("tr", {}, h("thead", {}, t));
-    ["Policy (all test options)", "CVaR 5%", "95% CI", "Gain vs daily delta", "95% CI", "Std", "Mean P&L"].forEach((x) => h("th", {}, head, x));
+  /* ---------- real data ---------- */
+  const shownReal = ["delta", "ww", "dp_real", "mpc", "learned"];
+  const methods = ["ww", "dp", "mpc_band", "deep_band", "deep_mlp", "deep_band_garch"];
+  legend($("#real-legend"), shownReal.map((k) => WHO[k]));
+  (() => {   // overview: gain over daily delta, every method x every stock
+    const t = $("#real-overview"), head = h("tr", {}, h("thead", {}, t));
+    h("th", {}, head, "Certainty-equivalent gain over daily delta");
+    R.forEach((r) => h("th", {}, head, r.ticker));
     const body = h("tbody", {}, t);
-    for (const row of S.summary) {
-      const tr = h("tr", row.label === "deep_mlp_cvar" ? { class: "hl" } : {}, body);
-      who(h("td", {}, tr), row.label);
-      h("td", {}, tr, fmt(row.cvar, 2));
-      h("td", {}, tr, `${fmt(row.cvar_lo, 2)} to ${fmt(row.cvar_hi, 2)}`);
-      h("td", {}, tr, row.label === "delta_daily" ? "—" : sgn(row.gain, 2));
-      h("td", {}, tr, row.label === "delta_daily" ? "" : `${sgn(row.gain_lo, 2)} to ${sgn(row.gain_hi, 2)}`);
-      h("td", {}, tr, row.std.toFixed(2));
-      h("td", {}, tr, sgn(row.mean, 2));
+    for (const lab of methods) {
+      const tr = h("tr", lab === "mpc_band" ? { class: "hl" } : {}, body);
+      who(h("td", {}, tr), RW[lab]);
+      for (const r of R) {
+        const row = r.summary.find((x) => x.label === lab), sig = row.gain_lo > 0 || row.gain_hi < 0;
+        const td = h("td", sig ? { class: "sig" } : {}, tr, sgn(row.gain, 3));
+        h("span", { class: "sub" }, td, `${sgn(row.gain_lo, 3)} to ${sgn(row.gain_hi, 3)}`);
+      }
     }
   })();
+  segmented($("#asset"), R.map((r, i) => ({ value: i, label: r.ticker })), state.asset, (v) => { state.asset = v; state.ep = 0; fillEpisodes(); renderReal(); });
+  const sel = $("#real-ep");
+  sel.addEventListener("change", () => { state.ep = +sel.value; renderReplay(); });
+  function fillEpisodes() {
+    sel.replaceChildren();
+    let worst = 0;
+    R[state.asset].replays.forEach((r, i) => h("option", { value: String(i) }, sel,
+      r.kind === "worst" ? `${r.start} · worst #${++worst} for daily delta` : `${r.start} · typical month`));
+  }
+  const byWho = (traces) => Object.fromEntries(Object.entries(traces).map(([k, v]) => [RW[k], v]));
+  function renderReplay() {
+    const A = R[state.asset], r = A.replays[state.ep];
+    spotChart($("#real-spot"), r.spot, `${A.ticker}, rescaled to 100 at the start`, (t) => [{ cls: "spot", name: A.pricing === "VIX" ? "VIX" : "vol (%)", value: r.vol[t].toFixed(1) }]);
+    const tr = byWho(r.traces);
+    positionChart($("#real-pos"), r.delta, tr, shownReal, "Shares held by each policy");
+    resultTable($("#real-ep-table"), tr, shownReal, "mpc");
+  }
+  function renderReal() {
+    const A = R[state.asset], t = $("#real-table");
+    $("#real-name").textContent = `${A.ticker} (${A.n_test} options, ${A.test_start.slice(0, 4)}–${A.test_end.slice(0, 4)}, priced at ${A.pricing})`;
+    t.replaceChildren();
+    const head = h("tr", {}, h("thead", {}, t));
+    ["Policy", "Risk (a = " + A.risk_aversion + ")", "Gain vs daily delta", "CVaR 5%", "Std", "Mean P&L", "Trades", "Cost"].forEach((x) => h("th", {}, head, x));
+    const body = h("tbody", {}, t);
+    for (const row of A.summary) {
+      const sig = row.label !== "delta_daily" && (row.gain_lo > 0 || row.gain_hi < 0);
+      const tr = h("tr", row.label === "mpc_band" ? { class: "hl" } : {}, body);
+      who(h("td", {}, tr), RW[row.label]);
+      h("td", {}, tr, fmt(row.entropic, 3));
+      const td = h("td", sig ? { class: "sig" } : {}, tr, row.label === "delta_daily" ? "—" : sgn(row.gain, 3));
+      if (row.label !== "delta_daily") h("span", { class: "sub" }, td, `${sgn(row.gain_lo, 3)} to ${sgn(row.gain_hi, 3)}`);
+      h("td", {}, tr, fmt(row.cvar, 2));
+      h("td", {}, tr, row.std.toFixed(2));
+      h("td", {}, tr, sgn(row.mean, 2));
+      h("td", {}, tr, row.trades.toFixed(1));
+      h("td", {}, tr, row.cost.toFixed(3));
+    }
+    renderReplay();
+  }
+  fillEpisodes();
 
   /* ---------- gradients ---------- */
   const noises = [...new Set(D.gradients.errors.map((r) => r.noise))];
@@ -653,16 +710,16 @@ uv run make_site.py                                             # this page's da
   (() => {
     const c = G.checks, host = $("#checks");
     const card = (title, html) => { const d = h("div", { class: "check" }, host); h("h3", {}, d, title); const p = h("p", {}, d); p.innerHTML = html; };
-    const ref = c.dp_refinement;
+    const ref = c.dp_refinement, g = c.gap_to_dp, gp = (k) => `<span class="num">${sgn(g[k].gap, 4)}</span> (${sgn(g[k].lo, 4)} to ${sgn(g[k].hi, 4)})`;
     card("A published result, reproduced", `Zero-cost daily delta hedging error: predicted std √(π/4)·vega·σ/√N = <span class="num">${c.kamal_derman.predicted.toFixed(3)}</span> (Kamal &amp; Derman, 1999); observed <span class="num">${c.kamal_derman.observed.toFixed(3)}</span> on ${G.n_test.toLocaleString("en")} paths.`);
-    card("The DP converges", `Optimal risk on grids of ${ref.map((r) => `${r[0]}×${r[1]}`).join(", ")}: <span class="num">${ref.map((r) => r[2].toFixed(4)).join(" → ")}</span>. The solver also checks that “clip to the band” is optimal from every grid position.`);
+    card("The DP converges", `Optimal risk at 10 bps as both grid steps halve (${ref.map((r) => `${r[0]}×${r[1]}`).join(", ")}): <span class="num">${ref.map((r) => r[2].toFixed(4)).join(" → ")}</span>. A brute-force check confirms that “clip to the band” is the best action from every grid position.`);
     card("Simulation agrees with the DP", `Exact DP value <span class="num">${c.dp_mc.value.toFixed(4)}</span>; simulating its policy on unseen paths gives <span class="num">${c.dp_mc.mc.toFixed(4)}</span> (95% CI ${c.dp_mc.lo.toFixed(4)} to ${c.dp_mc.hi.toFixed(4)}).`);
-    card("Gap to the optimum", `Paired bootstrap at 10 bps: learned <span class="num">${sgn(c.gap_to_dp.learned.gap, 4)}</span> (${sgn(c.gap_to_dp.learned.lo, 4)} to ${sgn(c.gap_to_dp.learned.hi, 4)}), daily delta <span class="num">${sgn(c.gap_to_dp.delta.gap, 4)}</span>, Whalley–Wilmott <span class="num">${sgn(c.gap_to_dp.ww.gap, 4)}</span>.`);
+    card("Gap to the optimum", `Paired bootstrap at 10 bps, extra entropic risk over DP: MPC ${gp("mpc")}, learned band ${gp("learned")}, daily delta ${gp("delta")}, Whalley–Wilmott ${gp("ww")}.`);
     card("Training and testing see the same P&L", `The PyTorch P&L used for training matches the backtester for every trained policy to <span class="num">${c.parity.toExponential(0)}</span>, and its gradient matches finite differences (tests).`);
     card("Limiting cases", `No costs: every band collapses to delta, and Whalley–Wilmott equals the daily delta hedge exactly. More costs widen the DP band; more risk aversion narrows it. Requests outside the position limits are clipped and counted (none from any policy shown).`);
   })();
 
-  const all = () => { renderBands(); renderLoop(); renderSpy(); renderGrad(); };
+  const all = () => { renderBands(); renderLoop(); renderReal(); renderGrad(); };
   all();
   let w = document.body.clientWidth;
   new ResizeObserver(() => { if (document.body.clientWidth !== w) { w = document.body.clientWidth; all(); } }).observe(document.body);

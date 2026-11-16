@@ -27,6 +27,7 @@ import pandas as pd
 
 from strategy import Observation, Strategy, black_scholes
 from strategies import STRATEGIES
+from strategies.models import gjr_garch_shocks
 
 CACHE_DIR = Path("data_cache")
 
@@ -100,19 +101,12 @@ def simulate_gbm(n_steps, s0=100.0, mu=0.0, sigma=0.2, seed=0, steps_per_year=25
 
 
 def simulate_gjr_garch(n_paths, n_steps, mu, omega, alpha, gamma, beta, h0, s0=100.0, seed=0) -> np.ndarray:
-    """Independent GJR-GARCH(1,1) price paths, shape (n_paths, n_steps+1). Per step (e.g. monthly):
-        log-return  Y_t = mu + eps_t,   eps_t = sqrt(h_t) z_t,   z_t ~ N(0, 1)
-        variance    h_{t+1} = omega + (alpha + gamma * 1{eps_t < 0}) eps_t^2 + beta h_t,   h_0 = h0
-    Unlike GBM, volatility moves: it stays high after big moves (clustering) and rises more after
-    drops than after rallies (gamma: the "leverage effect"). The setting of Neagu et al. (2025)."""
+    """Independent GJR-GARCH(1,1) price paths with normal shocks, shape (n_paths, n_steps+1), per-step
+    parameters (e.g. monthly); the recursion is in strategies/models.py. The setting of Neagu et al. (2025)."""
     rng = np.random.default_rng(seed)
-    log_s = np.zeros((n_paths, n_steps + 1))
-    h = np.full(n_paths, float(h0))
-    for t in range(n_steps):
-        eps = np.sqrt(h) * rng.standard_normal(n_paths)
-        log_s[:, t + 1] = log_s[:, t] + mu + eps
-        h = omega + (alpha + gamma * (eps < 0)) * eps**2 + beta * h
-    return s0 * np.exp(log_s)
+    eps, _ = gjr_garch_shocks(n_steps, omega, alpha, gamma, beta, np.full(n_paths, float(h0)),
+                              lambda k: rng.standard_normal(n_paths))
+    return s0 * np.exp(np.hstack([np.zeros((n_paths, 1)), np.cumsum(mu + eps, axis=1)]))
 
 
 def load_market_data(cfg) -> pd.DataFrame:
@@ -393,6 +387,33 @@ def _run_chunk(job):
     return [dict(strategy=label, **run_episode(env, strategy, ep)) for ep in load_episodes(cfg)[0][lo:hi]]
 
 
+def run_strategies(cfg, workers=1, example_idx=None):
+    """Run every strategy of `cfg` on its episodes. Returns one row per (strategy, episode) and, for
+    the episode `example_idx`, each strategy's step-by-step history. workers > 1 runs (strategy x
+    chunk of episodes) jobs in parallel processes; the results are identical either way."""
+    episodes, _ = load_episodes(cfg)
+    env = make_env(cfg)
+    rows, example = [], {}
+    if workers > 1:
+        from concurrent.futures import ProcessPoolExecutor
+        cuts = np.linspace(0, len(episodes), workers + 1).astype(int)
+        jobs = [(cfg, s, cuts[i], cuts[i + 1]) for s in cfg["strategies"] for i in range(workers) if cuts[i + 1] > cuts[i]]
+        with ProcessPoolExecutor(workers) as pool:
+            for chunk in pool.map(_run_chunk, jobs):     # map keeps job order = episode order per strategy
+                rows += chunk
+    for s in cfg["strategies"]:
+        label = s.get("label", s["name"])
+        strategy = STRATEGIES[s["name"]](**s.get("params", {}))
+        todo = enumerate(episodes) if workers <= 1 else ([] if example_idx is None else [(example_idx, episodes[example_idx])])
+        for i, ep in todo:
+            r = dict(strategy=label, **run_episode(env, strategy, ep))
+            if workers <= 1:
+                rows.append(r)
+            if i == example_idx:
+                example[label] = pd.DataFrame(env.history)
+    return pd.DataFrame(rows), example
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--config", required=True, help="path to a JSON config, e.g. configs/spy_vix.json")
@@ -403,32 +424,10 @@ def main():
     name = cfg.get("name", Path(args.config).stem)
 
     opt = cfg["option"]
-    n_steps = opt["maturity_steps"]
     episodes, source = load_episodes(cfg)
-    env = make_env(cfg)
-    print(f"[{name}] {source}, {len(episodes)} episodes "
-          f"of {n_steps} steps, short 1 {opt.get('type', 'call')} at moneyness {opt.get('moneyness', 1.0)}")
-
-    rows, example = [], {}
-    ex_idx = cfg.get("plot_episode", len(episodes) // 2)
-    if args.workers > 1:
-        from concurrent.futures import ProcessPoolExecutor
-        cuts = np.linspace(0, len(episodes), args.workers + 1).astype(int)
-        jobs = [(cfg, s, cuts[i], cuts[i + 1]) for s in cfg["strategies"] for i in range(args.workers) if cuts[i + 1] > cuts[i]]
-        with ProcessPoolExecutor(args.workers) as pool:
-            for chunk in pool.map(_run_chunk, jobs):     # map keeps job order = episode order per strategy
-                rows += chunk
-    for s in cfg["strategies"]:
-        label = s.get("label", s["name"])
-        strategy = STRATEGIES[s["name"]](**s.get("params", {}))
-        todo = enumerate(episodes) if args.workers <= 1 else [(ex_idx, episodes[ex_idx])]
-        for i, ep in todo:
-            r = dict(strategy=label, **run_episode(env, strategy, ep))
-            if args.workers <= 1:
-                rows.append(r)
-            if i == ex_idx:
-                example[label] = pd.DataFrame(env.history)
-    results = pd.DataFrame(rows)
+    print(f"[{name}] {source}, {len(episodes)} episodes of {opt['maturity_steps']} steps, "
+          f"short 1 {opt.get('type', 'call')} at moneyness {opt.get('moneyness', 1.0)}")
+    results, example = run_strategies(cfg, args.workers, cfg.get("plot_episode", len(episodes) // 2))
     ev = cfg.get("eval", {})
     summary = summarize(results, ev.get("n_splits", 1), ev.get("risk_aversion"))
 

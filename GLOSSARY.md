@@ -265,12 +265,12 @@ Read it top to bottom; later terms build on earlier ones. Section 8 is a fully w
 ### Whalley-Wilmott band
 - **Technical:** The asymptotically optimal no-trade band for an exponential-utility hedger with proportional costs: `delta ± (3/2 · e^(−rτ) · cost_rate · S · Γ² / risk_aversion)^(1/3)`, trading only to the nearest edge (Whalley & Wilmott, 1997). Derived for continuous trading and small costs.
 - **Intuition:** A no-trade band whose width is computed instead of guessed: wide where gamma is big (delta jumps around, chasing it is expensive), narrow when you are very risk averse.
-- **In the code:** `ww_band` strategy (also registered as `whalley_wilmott`), `params.risk_aversion`.
+- **In the code:** `ww_band` strategy, `params.risk_aversion`.
 
 ### Deep hedging; pathwise gradient
 - **Technical:** Train a neural-net hedging policy by minimizing a risk measure of final P&L over many price paths (Buehler et al., 2019). Because our trades don't move the price, P&L is a differentiable function of the positions, so the gradient flows straight through the episode (the *pathwise* or reparameterization gradient), with no need for policy-gradient estimators.
 - **Intuition:** Simulate the hedge on thousands of past paths at once, ask "how would the bad outcomes change if I nudged every position a little?", and nudge.
-- **In the code:** `deep_hedge.py` (training), `deep_hedge` strategy (evaluation). `arch: "band"` learns a no-trade band around delta (Imaki et al., 2021); `arch: "mlp"` outputs the position directly.
+- **In the code:** `train.py` (training), `deep_hedge` strategy in `strategies/learned.py` (evaluation). `arch: "band"` learns a no-trade band around delta (Imaki et al., 2021); `arch: "mlp"` outputs the position directly.
 
 ### Unwind / liquidate
 - **Technical:** Closing a position by trading it back to zero.
@@ -340,7 +340,7 @@ Read it top to bottom; later terms build on earlier ones. Section 8 is a fully w
 ### Entropic risk
 - **Technical:** `(1/a) · log E[exp(−a · P&L)]` for risk aversion `a`: the certainty-equivalent loss of an investor with exponential utility. ≈ `−mean + (a/2)·variance` when P&L is roughly normal.
 - **Intuition:** A smooth risk measure that cares about the whole distribution, more and more about bad outcomes as `a` grows. It is the objective the Whalley-Wilmott band is optimal for.
-- **In the code:** `objective: {"type": "entropic", "risk_aversion": a}` in a `deep_hedge` strategy; `objective: "cara"` in `mpc`; what `dp` and `dp_optimal` minimize. The `ce` metric is minus it.
+- **In the code:** `objective: {"type": "entropic", "risk_aversion": a}` in a `deep_hedge` strategy; `objective: "cara"` in `mpc`; what `dp` and `ww_band` minimize. The `ce` metric is minus it.
 
 ### Train / validation / test split
 - **Technical:** Learned strategies train on the early part of the data (`split.test_start`), pick their checkpoint on its last 20% (validation), and everything is scored on the test period after it. Splits are chronological, never random, and episodes are cut separately on each side.

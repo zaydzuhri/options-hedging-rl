@@ -7,8 +7,8 @@ import pytest
 import torch
 
 from backtest import HedgingEnv, run_episode
-from deep_hedge import (ARCHS, DEFAULTS, DTYPE, episode_pnl, episode_tensors, load_policy, risk, save_policy)
-from strategies.learned import DeepHedge
+from strategies.learned import ARCHS, DTYPE, DeepHedge, load_policy, save_policy
+from train import DEFAULTS, episode_pnl, episode_tensors, risk
 
 MARKET = dict(kind="call", moneyness=1.0, rate=0.03, cost_rate=0.001, steps_per_year=252, n_steps=21, limits=(0.0, 1.0))
 
@@ -23,8 +23,7 @@ def random_policy(arch, seed=0):
 
 
 def pnl(policy, ep):
-    m = MARKET
-    return episode_pnl(policy, ep, m["cost_rate"], m["rate"], 1.0 / m["steps_per_year"], m["limits"])
+    return episode_pnl(policy, ep, MARKET)
 
 
 @pytest.mark.parametrize("arch", ["band", "mlp"])
@@ -36,7 +35,7 @@ def test_differentiable_pnl_matches_backtester(arch, episodes, tmp_path):
     strategy = DeepHedge(model=str(path))
     eps = episodes[:30]
     env_pnl = np.array([run_episode(env, strategy, ep)["pnl"] for ep in eps])
-    ep = episode_tensors(eps, "call", 1.0, MARKET["rate"], 252)
+    ep = episode_tensors(eps, MARKET)
     with torch.no_grad():
         torch_pnl = pnl(load_policy(path), ep).numpy()
     assert np.abs(env_pnl - torch_pnl).max() < 1e-10
@@ -44,7 +43,7 @@ def test_differentiable_pnl_matches_backtester(arch, episodes, tmp_path):
 
 def test_pathwise_gradient_matches_finite_differences(episodes):
     policy = random_policy("band")
-    ep = episode_tensors(episodes[:200], "call", 1.0, MARKET["rate"], 252)
+    ep = episode_tensors(episodes[:200], MARKET)
     objective = {"type": "entropic", "risk_aversion": 1.0}
     loss = risk(pnl(policy, ep), objective)
     loss.backward()
@@ -69,7 +68,7 @@ def test_risk_measures():
 def test_policies_respect_position_limits(episodes):
     for arch in ["band", "mlp"]:
         policy = random_policy(arch, seed=1)
-        ep = episode_tensors(episodes[:50], "call", 1.0, 0.0, 252)
+        ep = episode_tensors(episodes[:50], MARKET)
         with torch.no_grad():
             out = policy(ep["features"][:, 0], ep["delta"][:, 0], torch.full((50,), 5.0, dtype=DTYPE))
         assert out.min() >= 0.0 and out.max() <= 1.0
